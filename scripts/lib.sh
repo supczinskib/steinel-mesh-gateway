@@ -5,13 +5,18 @@ project_root() {
 }
 
 find_esphome() {
-  local candidate="${ESPHOME:-/opt/esphome-nightmatiq/bin/esphome}"
+  local candidate="${ESPHOME:-/opt/esphome-steinel/bin/esphome}"
   if [[ -x "$candidate" ]]; then
     printf '%s\n' "$candidate"
     return 0
   fi
   candidate="$(command -v esphome 2>/dev/null || true)"
   if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  candidate="/opt/esphome-nightmatiq/bin/esphome"
+  if [[ -x "$candidate" ]]; then
     printf '%s\n' "$candidate"
     return 0
   fi

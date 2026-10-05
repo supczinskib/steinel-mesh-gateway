@@ -1,0 +1,6 @@
+{
+  "name": "steinel-gateway-web-tests",
+  "private": true,
+  "scripts": { "test": "node test_web.cjs && node test_web_control_confirmation.cjs && node test_web_update.cjs && node test_ha_popup.cjs" },
+  "devDependencies": { "jsdom": "30.1.1" }
+}

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG="$ROOT_DIR/esphome/nightmatiq-c3.yaml"
+CONFIG="$ROOT_DIR/esphome/steinel-c3.yaml"
 FAIL=0
 IS_GIT_WORKTREE=0
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -12,7 +12,7 @@ fi
 ok() { printf 'OK: %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
-printf '%s\n' '=== Steinel NightmatIQ ESP32-C3 Gateway self-test ==='
+printf '%s\n' '=== Steinel Mesh ESP32-C3 Gateway self-test ==='
 
 for script in "$ROOT_DIR"/scripts/*.sh; do
   if bash -n "$script"; then
@@ -32,19 +32,22 @@ for path in \
   "$ROOT_DIR/README.md" \
   "$ROOT_DIR/README_PL.md" \
   "$ROOT_DIR/README_DE.md" \
+  "$ROOT_DIR/README_FR.md" \
   "$ROOT_DIR/CHANGELOG.md" \
+  "$ROOT_DIR/docs/DEVICE_COMPATIBILITY.md" \
+  "$ROOT_DIR/docs/releases/v2.0.0.md" \
   "$CONFIG" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/__init__.py" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/nightmatiq_mesh.h" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/nightmatiq_mesh.cpp" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/nightmatiq_web.cpp" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/nightmatiq_page.html" \
-  "$ROOT_DIR/esphome/components/nightmatiq_mesh/nightmatiq_page.h" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/__init__.py" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/steinel_mesh.h" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/steinel_mesh.cpp" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/steinel_web.cpp" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/steinel_page.html" \
+  "$ROOT_DIR/esphome/components/steinel_mesh/steinel_page.h" \
   "$ROOT_DIR/scripts/10_prepare_release.sh" \
   "$ROOT_DIR/home-assistant/steinel-nightmatiq-package.yaml" \
   "$ROOT_DIR/home-assistant/steinel-nightmatiq-popup.js" \
   "$ROOT_DIR/docs/images/esp32-c3-super-mini.jpg" \
-  "$ROOT_DIR/docs/images/nightmatiq-web-interface.png" \
+  "$ROOT_DIR/docs/images/steinel-web-interface.png" \
   "$ROOT_DIR/docs/images/home-assistant-device.png" \
   "$ROOT_DIR/docs/images/home-assistant-control.png"; do
   if [[ -f "$path" ]]; then
@@ -55,8 +58,8 @@ for path in \
 done
 
 for marker in \
-  'project_version: "1.1.1"' \
-  '## 1.1.1'; do
+  'project_version: "2.0.0"' \
+  '## 2.0.0'; do
   if grep -Fq "$marker" "$CONFIG" "$ROOT_DIR/CHANGELOG.md"; then
     ok "release marker: $marker"
   else
@@ -90,10 +93,14 @@ fi
 for navigation in \
   'README.md:README_PL.md:README_DE.md' \
   'README_PL.md:README.md:README_DE.md' \
-  'README_DE.md:README.md:README_PL.md'; do
+  'README_DE.md:README.md:README_PL.md' \
+  'README_FR.md:README.md:README_PL.md'; do
   IFS=: read -r file first second <<<"$navigation"
   grep -Fq "$first" "$ROOT_DIR/$file" || fail "missing language navigation in $file: $first"
   grep -Fq "$second" "$ROOT_DIR/$file" || fail "missing language navigation in $file: $second"
+  if [[ "$file" != "README_FR.md" ]]; then
+    grep -Fq 'README_FR.md' "$ROOT_DIR/$file" || fail "missing French language navigation in $file"
+  fi
   grep -Fq 'web.esphome.io' "$ROOT_DIR/$file" || fail "missing ready-made installation instructions: $file"
 done
 
@@ -105,7 +112,7 @@ for marker in \
   'name_add_mac_suffix: true' \
   'factory_username: "admin"' \
   'factory_password: "12345678"' \
-  'id: nightmatiq_ota' \
+  'id: steinel_ota' \
   'password: ""' \
   'password: "${factory_password}"' \
   'channel: 6' \
@@ -134,6 +141,7 @@ from __future__ import annotations
 
 import ast
 import gzip
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -147,25 +155,33 @@ for path in (root / "scripts").glob("*.py"):
     except SyntaxError as error:
         errors.append(f"invalid Python syntax in {path.name}: {error}")
 
-html = (root / "esphome/components/nightmatiq_mesh/nightmatiq_page.html").read_bytes()
-header = (root / "esphome/components/nightmatiq_mesh/nightmatiq_page.h").read_text(encoding="utf-8")
-size_match = re.search(r"NIGHTMATIQ_PAGE_RAW_SIZE = (\d+);", header)
-array_match = re.search(r"NIGHTMATIQ_PAGE_GZ\[\d+\] = \{(.*?)\};", header, re.DOTALL)
+page_path = root / "esphome/components/steinel_mesh/steinel_page.html"
+translations = page_path.with_name("steinel_i18n.js").read_text(encoding="utf-8")
+page = page_path.read_text(encoding="utf-8").replace(
+    "<!-- STEINEL_I18N -->", "<script>\n" + translations + "\n</script>"
+)
+revision = hashlib.sha256(page.encode("utf-8")).hexdigest()[:16]
+html = page.replace('__STEINEL_PAGE_REVISION__', revision).encode("utf-8")
+header = (root / "esphome/components/steinel_mesh/steinel_page.h").read_text(encoding="utf-8")
+if f'STEINEL_PAGE_REVISION[] = "{revision}";' not in header:
+    errors.append("generated web revision is stale")
+size_match = re.search(r"STEINEL_PAGE_RAW_SIZE = (\d+);", header)
+array_match = re.search(r"STEINEL_PAGE_GZ\[\d+\] = \{(.*?)\};", header, re.DOTALL)
 if size_match is None or array_match is None:
-    errors.append("generated NightmatIQ page header has an invalid structure")
+    errors.append("generated Steinel Mesh page header has an invalid structure")
 else:
     compressed = bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", array_match.group(1)))
     try:
         embedded = gzip.decompress(compressed)
     except gzip.BadGzipFile as error:
-        errors.append(f"generated NightmatIQ page is not valid gzip: {error}")
+        errors.append(f"generated Steinel Mesh page is not valid gzip: {error}")
     else:
         if embedded != html:
-            errors.append("generated NightmatIQ page header is stale")
+            errors.append("generated Steinel Mesh page header is stale")
         if int(size_match.group(1)) != len(html):
-            errors.append("generated NightmatIQ raw page size is stale")
+            errors.append("generated Steinel Mesh raw page size is stale")
 
-mesh = (root / "esphome/components/nightmatiq_mesh/nightmatiq_mesh.cpp").read_text(encoding="utf-8")
+mesh = (root / "esphome/components/steinel_mesh/steinel_mesh.cpp").read_text(encoding="utf-8")
 for marker in (
     "esp_ble_gap_set_rand_addr(random_address)",
     "esp_ble_gap_set_scan_params(&this->identity_scan_params_)",
@@ -174,12 +190,12 @@ for marker in (
     "ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET",
 ):
     if marker not in mesh:
-        errors.append(f"missing NightmatIQ source marker: {marker}")
+        errors.append(f"missing Steinel Mesh source marker: {marker}")
 
-header_source = (root / "esphome/components/nightmatiq_mesh/nightmatiq_mesh.h").read_text(encoding="utf-8")
-web_source = (root / "esphome/components/nightmatiq_mesh/nightmatiq_web.cpp").read_text(encoding="utf-8")
-component_source = (root / "esphome/components/nightmatiq_mesh/__init__.py").read_text(encoding="utf-8")
-config_source = (root / "esphome/nightmatiq-c3.yaml").read_text(encoding="utf-8")
+header_source = (root / "esphome/components/steinel_mesh/steinel_mesh.h").read_text(encoding="utf-8")
+web_source = (root / "esphome/components/steinel_mesh/steinel_web.cpp").read_text(encoding="utf-8")
+component_source = (root / "esphome/components/steinel_mesh/__init__.py").read_text(encoding="utf-8")
+config_source = (root / "esphome/steinel-c3.yaml").read_text(encoding="utf-8")
 page_source = html.decode("utf-8")
 for source, marker in (
     (header_source, "ADDRESS_POOL_TARGET_SIZE = 2048"),
@@ -209,15 +225,13 @@ for source, marker in (
     (mesh, "rssi_sensor_->publish_state"),
     (component_source, 'CONF_RSSI_SENSOR_ID = "rssi_sensor_id"'),
     (component_source, "var.set_rssi_sensor(rssi)"),
-    (config_source, 'friendly_name: "Steinel NightmatIQ Plus"'),
-    (config_source, "rssi_sensor_id: nightmatiq_rssi"),
-    (config_source, 'name: "NightmatIQ Signal Strength"'),
+    (config_source, 'friendly_name: "Steinel Mesh Gateway"'),
+    (config_source, "rssi_sensor_id: steinel_rssi"),
+    (config_source, 'name: "Mesh Signal Strength"'),
     (config_source, "device_class: signal_strength"),
-    (config_source, 'name: "NightmatIQ Refresh"'),
-    (config_source, "id(nightmatiq_gateway).request_refresh();"),
-    (config_source, "optimistic: true"),
-    (config_source, "restore_value: true"),
-    (config_source, 'initial_option: "Auto"'),
+    (config_source, 'name: "Refresh Devices"'),
+    (config_source, "id(steinel_gateway).request_refresh();"),
+    (config_source, "optimistic: false"),
     (web_source, "mesh_last_rssi_dbm"),
     (web_source, "mesh_last_rssi_age_seconds"),
     (page_source, "Last Mesh RSSI"),
@@ -274,10 +288,10 @@ for source, marker in (
     (web_source, 'send_json_(request, 200, "{\\\"message\\\":\\\"Changing NightmatIQ mode\\\"}")'),
     (web_source, 'send_json_(request, 200, "{\\\"message\\\":\\\"Changing twilight threshold\\\"}")'),
     (web_source, 'send_json_(request, 200, "{\\\"message\\\":\\\"Refreshing NightmatIQ state\\\"}")'),
-    (page_source, "NightmatIQ control"),
-    (page_source, "modeControl"),
-    (page_source, "thresholdControl"),
-    (page_source, "refreshControl"),
+    (page_source, "Device details"),
+    (page_source, "/steinel/node"),
+    (page_source, "refreshDevices"),
+    (page_source, "node.functions"),
     (page_source, "Administrator access"),
     (page_source, "Gateway administration"),
     (page_source, "Factory reset"),
@@ -343,8 +357,8 @@ for script_path in (root / "scripts").glob("*.sh"):
     if "patch_esphome" in script_path.read_text(encoding="utf-8"):
         errors.append(f"ESPHome patch hook remains in {script_path.name}")
 
-if "\n  devices:\n" in config_source:
-    errors.append("standalone C3 must expose NightmatIQ as its primary Home Assistant device")
+if '<section id="controls"' in page_source:
+    errors.append("a privileged single-device control panel remains")
 
 for forbidden_gui_marker in (
     "Automatic address recovery",
@@ -367,8 +381,8 @@ for forbidden_source_marker in (
     if forbidden_source_marker in web_source:
         errors.append(f"obsolete Mesh address interface remains public: {forbidden_source_marker}")
 
-control_handlers = web_source.split("void NightmatiqMesh::handle_mode_", 1)[1].split(
-    "bool NightmatiqMesh::cloud_get_", 1
+control_handlers = web_source.split("void SteinelMesh::handle_mode_", 1)[1].split(
+    "bool SteinelMesh::cloud_get_", 1
 )[0]
 if "send_json_(request, 202" in control_handlers:
     errors.append("NightmatIQ web controls must use an HTTP status supported by web_server_idf")
@@ -377,12 +391,18 @@ if errors:
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
     raise SystemExit(1)
-print("OK: Python syntax and embedded NightmatIQ page")
+print("OK: Python syntax and embedded Steinel Mesh page")
 PY
 then
-  ok 'NightmatIQ source checks'
+  ok 'Steinel Mesh source checks'
 else
-  fail 'NightmatIQ source checks failed'
+  fail 'Steinel Mesh source checks failed'
+fi
+
+if python3 "$ROOT_DIR/tests/test_compatibility_docs.py"; then
+  ok 'compatibility lists and release documentation'
+else
+  fail 'compatibility documentation is inconsistent'
 fi
 
 if (( FAIL > 0 )); then

@@ -4,7 +4,7 @@
   if (window.__steinelNightmatiqPopupInstalled) return;
   window.__steinelNightmatiqPopupInstalled = true;
 
-  const ENTITIES = Object.freeze({
+  const LEGACY_ENTITIES = Object.freeze({
     output:
       "binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output",
     illuminance:
@@ -18,6 +18,51 @@
     en: "sensor.steinel_nightmatiq_sensor_state",
   });
   const MODE_VALUES = new Set(["Auto", "Always On", "Always Off"]);
+  const isSteinelDevice = (hass, deviceId) => {
+    const model = hass?.devices?.[deviceId]?.model;
+    return !model || ["steinel_mesh_gateway", "steinel_nightmatiq_gateway", "NightmatIQ Plus"].includes(model);
+  };
+  let resolvedDevice = null;
+  let resolvedEntities = null;
+  const resolveEntities = (hass) => {
+    const configured = window.steinelNightmatiqEntities;
+    if (configured?.mode) return { ...configured };
+    if (resolvedEntities && !resolvedDevice) return resolvedEntities;
+    const states = hass?.states ?? {};
+    const modes = Object.keys(states).filter((id) => id.startsWith("select.") &&
+      states[id].attributes?.options?.length === 3 &&
+      states[id].attributes.options.every((option) => MODE_VALUES.has(option))).sort();
+    const candidates = [];
+    for (const mode of modes) {
+      const device = hass?.entities?.[mode]?.device_id;
+      if (!device || !isSteinelDevice(hass, device)) continue;
+      if (resolvedDevice && device !== resolvedDevice) continue;
+      const sameDevice = Object.keys(states).filter((id) => hass.entities?.[id]?.device_id === device);
+      const output = sameDevice.find((id) => id.startsWith("binary_sensor.") &&
+        (id.endsWith("_output") || states[id].attributes?.friendly_name?.endsWith("Output")));
+      if (!output) continue;
+      candidates.push({ device, entities: {
+        output, mode,
+        illuminance: sameDevice.find((id) => id.startsWith("sensor.") && states[id].attributes?.device_class === "illuminance"),
+        threshold: sameDevice.find((id) => id.startsWith("number.") && states[id].attributes?.unit_of_measurement === "lx"),
+      } });
+    }
+    if (candidates.length === 1) {
+      resolvedDevice = candidates[0].device;
+      resolvedEntities = candidates[0].entities;
+      return resolvedEntities;
+    }
+    if (resolvedEntities) return resolvedEntities;
+    if (candidates.length === 0 && states[LEGACY_ENTITIES.mode] && states[LEGACY_ENTITIES.output] &&
+        isSteinelDevice(hass, hass?.entities?.[LEGACY_ENTITIES.mode]?.device_id)) {
+      resolvedEntities = LEGACY_ENTITIES;
+      return resolvedEntities;
+    }
+    return {};
+  };
+  const ENTITIES = Object.freeze(Object.defineProperties({}, Object.fromEntries(
+    Object.keys(LEGACY_ENTITIES).map((key) =>
+      [key, { get: () => resolveEntities(getHass())[key], enumerable: true }]))));
   const TRANSLATIONS = Object.freeze({
     pl: Object.freeze({
       locale: "pl-PL",
@@ -56,6 +101,7 @@
   });
 
   const OPTIMISTIC_CONFIRMATION_TIMEOUT_MS = 5000;
+  const MODE_CONFIRMATION_TIMEOUT_MS = 60000;
   const LEGACY_TILE_CARD_TYPE = "custom:steinel-nightmatiq-tile";
   const AREA_STRATEGY_PATCH_FLAG = "__steinelNightmatiqAreaStrategyPatched";
   const AREA_VIEW_REPAIR_DELAYS = [0, 100, 500, 1500];
@@ -132,7 +178,9 @@
 
     async setMode(mode) {
       const hass = getHass();
-      if (!hass || !MODE_VALUES.has(mode)) return;
+      const entity = resolveEntities(hass).mode;
+      if (!hass || !entity || !MODE_VALUES.has(mode) ||
+          !MODE_VALUES.has(hass.states[entity]?.state)) return;
 
       const requestSequence = ++this.modeRequestSequence;
       this.optimisticMode = mode;
@@ -143,7 +191,7 @@
         this.optimisticMode = null;
         this.modeConfirmationTimer = null;
         this.updateState();
-      }, OPTIMISTIC_CONFIRMATION_TIMEOUT_MS);
+      }, MODE_CONFIRMATION_TIMEOUT_MS);
       this.updateState();
 
       try {
@@ -151,7 +199,7 @@
           "select",
           "select_option",
           { option: mode },
-          { entity_id: ENTITIES.mode },
+          { entity_id: entity },
         );
       } catch (_error) {
         if (requestSequence !== this.modeRequestSequence) return;
@@ -165,7 +213,8 @@
     async setThreshold(value) {
       const hass = getHass();
       const parsed = Number.parseInt(value, 10);
-      if (!hass || !Number.isFinite(parsed)) return;
+      const entity = resolveEntities(hass).threshold;
+      if (!hass || !entity || numberState(hass, entity) === null || !Number.isFinite(parsed)) return;
 
       const requestedValue = Math.min(1500, Math.max(1, parsed));
       this.thresholdEditing = false;
@@ -187,7 +236,7 @@
           "number",
           "set_value",
           { value: requestedValue },
-          { entity_id: ENTITIES.threshold },
+          { entity_id: entity },
         );
       } catch (_error) {
         if (requestSequence !== this.thresholdRequestSequence) return;
@@ -473,15 +522,17 @@
       this.shadowRoot.querySelector("#illuminance").textContent = `${formatNumber(lux, this.text.locale)} lx`;
 
       const observedMode = hass.states[ENTITIES.mode]?.state;
+      const modeAvailable = !unavailable && MODE_VALUES.has(observedMode);
       if (this.optimisticMode !== null && observedMode === this.optimisticMode) {
         this.optimisticMode = null;
         window.clearTimeout(this.modeConfirmationTimer);
         this.modeConfirmationTimer = null;
       }
       const mode = this.optimisticMode ?? observedMode;
-      this.shadowRoot.querySelectorAll(".mode").forEach((button) =>
-        button.classList.toggle("active", button.dataset.mode === mode),
-      );
+      this.shadowRoot.querySelectorAll(".mode").forEach((button) => {
+        button.disabled = !modeAvailable;
+        button.classList.toggle("active", modeAvailable && button.dataset.mode === mode);
+      });
 
       const observedThreshold = numberState(hass, ENTITIES.threshold);
       if (this.optimisticThreshold !== null &&
@@ -494,6 +545,7 @@
       const threshold = this.optimisticThreshold ?? observedThreshold;
       const range = this.shadowRoot.querySelector("#thresholdRange");
       const number = this.shadowRoot.querySelector("#thresholdNumber");
+      range.disabled = number.disabled = unavailable || observedThreshold === null;
       if (threshold !== null && !this.thresholdEditing) {
         range.value = String(threshold);
         number.value = String(threshold);
@@ -536,12 +588,20 @@
   const replaceSteinelOutputCard = (sections, hass) =>
     sections.map((section) => {
       if (!Array.isArray(section.cards)) return section;
+      const deviceId = hass?.entities?.[ENTITIES.output]?.device_id;
       let changed = false;
       const cards = section.cards.flatMap((card) => {
         if (isSteinelSummaryCard(card)) return [card];
-        if (!isSteinelOutputCard(card)) return [card];
-        changed = true;
-        return steinelTileConfigs(hass);
+        if (isSteinelOutputCard(card)) {
+          changed = true;
+          return steinelTileConfigs(hass);
+        }
+        const entity = card.type === "conditional" ? card.card?.entity : card.entity;
+        if (deviceId && hass.entities?.[entity]?.device_id === deviceId) {
+          changed = true;
+          return [];
+        }
+        return [card];
       });
       return changed ? { ...section, cards } : section;
     });

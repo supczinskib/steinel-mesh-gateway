@@ -1,4 +1,4 @@
-#include "nightmatiq_mesh.h"
+#include "steinel_mesh.h"
 
 #include <algorithm>
 #include <cinttypes>
@@ -19,14 +19,13 @@
 #include "esp_bt.h"
 #include "esp_bt_device.h"
 #include "esp_bt_main.h"
+#include "esp_coexist.h"
 #include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "esp_ota_ops.h"
 
-// ESP-IDF exposes read/delete operations for provisioner nodes publicly, but
-// its settings loader uses this internal restore entry point to rebuild the
-// same public esp_ble_mesh_node_t layout. We use it only to reconstruct the
-// already-provisioned NightmatIQ address range from our authenticated backup.
+// ESP-IDF's internal restore entry point rebuilds esp_ble_mesh_node_t records
+// for already-provisioned nodes from the authenticated backup.
 extern "C" {
 struct bt_mesh_node;
 int bt_mesh_provisioner_restore_node_info(struct bt_mesh_node *node);
@@ -34,15 +33,12 @@ int bt_mesh_provisioner_restore_node_info(struct bt_mesh_node *node);
 }
 
 namespace esphome {
-namespace nightmatiq_mesh {
+namespace steinel_mesh {
 
-static const char *const TAG = "nightmatiq_mesh";
+static const char *const TAG = "steinel_mesh";
 static constexpr uint16_t AMBIENT_LIGHT_LEVEL_PROPERTY = 0x004E;
 static constexpr uint16_t LC_LIGHT_ON_THRESHOLD_PROPERTY = 0x002B;
 static constexpr uint8_t MESSAGE_TTL = 7;
-// Normal state reads are local, single-hop Mesh traffic. A four-second client
-// timeout made a user command wait behind a missed background response. Keep
-// routine Access requests short; Composition Data has its own longer timeout.
 static constexpr uint32_t MESSAGE_TIMEOUT_MS = 1200;
 
 static void reboot_after_confirming_firmware() {
@@ -59,8 +55,7 @@ static constexpr uint32_t IDENTITY_SCAN_WINDOW_MS = 30000;
 static constexpr uint32_t IDENTITY_SCAN_PREPARE_TIMEOUT_MS = 15000;
 static constexpr uint32_t IDENTITY_SCAN_STOP_TIMEOUT_MS = 2000;
 static constexpr uint32_t IDENTITY_SCAN_COMMAND_SETTLE_MS = 250;
-// Match the Android scanner that receives the Steinel SCAN_RSP: active BLE
-// scanning with a 100 ms interval and a full 100 ms window.
+// Active scanning: 100 ms interval and window.
 static constexpr uint32_t IDENTITY_SCAN_INTERVAL_UNITS = 160;
 static constexpr uint8_t COMPOSITION_FAST_RETRY_LIMIT = 3;
 static constexpr uint32_t COMPOSITION_FAST_RETRY_MS = 1500;
@@ -68,12 +63,7 @@ static constexpr uint32_t COMPOSITION_BACKGROUND_RETRY_MS = 60000;
 static constexpr uint32_t COMPOSITION_REFRESH_INTERVAL_MS = 6UL * 60UL * 60UL * 1000UL;
 static constexpr uint32_t COMPOSITION_REQUEST_WATCHDOG_MS = COMPOSITION_MESSAGE_TIMEOUT_MS + 1500;
 
-// Composition Version ID identifies the device composition, not the semantic
-// application release. Never translate it into a firmware version. Versions
-// and hardware revisions are accepted only from Steinel manufacturer data
-// emitted by the NightmatIQ itself.
-
-NightmatiqMesh *NightmatiqMesh::instance_ = nullptr;
+SteinelMesh *SteinelMesh::instance_ = nullptr;
 
 static uint8_t device_uuid[16]{};
 static esp_ble_mesh_cfg_srv_t config_server{};
@@ -82,6 +72,7 @@ static esp_ble_mesh_client_t onoff_client{};
 static esp_ble_mesh_client_t sensor_client{};
 static esp_ble_mesh_client_t scene_client{};
 static esp_ble_mesh_client_t light_lc_client{};
+static esp_ble_mesh_client_t lightness_client{};
 
 static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_CFG_SRV(&config_server),
@@ -90,6 +81,7 @@ static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_SENSOR_CLI(nullptr, &sensor_client),
     ESP_BLE_MESH_MODEL_SCENE_CLI(nullptr, &scene_client),
     ESP_BLE_MESH_MODEL_LIGHT_LC_CLI(nullptr, &light_lc_client),
+    ESP_BLE_MESH_MODEL_LIGHT_LIGHTNESS_CLI(nullptr, &lightness_client),
 };
 
 static esp_ble_mesh_elem_t elements[] = {
@@ -99,9 +91,9 @@ static esp_ble_mesh_elem_t elements[] = {
 static esp_ble_mesh_comp_t composition{};
 static esp_ble_mesh_prov_t *provision = nullptr;
 
-float NightmatiqMesh::get_setup_priority() const { return setup_priority::AFTER_BLUETOOTH - 1.0f; }
+float SteinelMesh::get_setup_priority() const { return setup_priority::AFTER_BLUETOOTH - 1.0f; }
 
-bool NightmatiqMesh::load_advertised_identity_() {
+bool SteinelMesh::load_advertised_identity_() {
   StoredAdvertisedIdentity stored{};
   if (!this->advertised_identity_preference_.load(&stored) ||
       stored.magic != ADVERTISED_IDENTITY_MAGIC ||
@@ -122,7 +114,7 @@ bool NightmatiqMesh::load_advertised_identity_() {
   return true;
 }
 
-bool NightmatiqMesh::save_advertised_identity_(const StoredAdvertisedIdentity &identity) {
+bool SteinelMesh::save_advertised_identity_(const StoredAdvertisedIdentity &identity) {
   StoredAdvertisedIdentity saved{};
   const bool unchanged = this->advertised_identity_preference_.load(&saved) &&
                          saved.magic == ADVERTISED_IDENTITY_MAGIC &&
@@ -151,7 +143,7 @@ bool NightmatiqMesh::save_advertised_identity_(const StoredAdvertisedIdentity &i
   return true;
 }
 
-void NightmatiqMesh::clear_advertised_identity_() {
+void SteinelMesh::clear_advertised_identity_() {
   StoredAdvertisedIdentity empty{};
   empty.magic = 0;
   this->advertised_identity_preference_.save(&empty);
@@ -169,7 +161,7 @@ void NightmatiqMesh::clear_advertised_identity_() {
   this->advertised_identity_publish_pending_.store(true);
 }
 
-bool NightmatiqMesh::advertised_identity_current_() const {
+bool SteinelMesh::advertised_identity_current_() const {
   if (!this->advertised_identity_valid_.load() || !this->composition_received_.load())
     return false;
   if (this->advertised_product_id_.load() != this->live_product_id_.load())
@@ -180,7 +172,7 @@ bool NightmatiqMesh::advertised_identity_current_() const {
   return associated_vid != 0 && associated_vid == this->live_version_id_.load();
 }
 
-bool NightmatiqMesh::resolve_firmware_version_(uint8_t &major, uint8_t &minor,
+bool SteinelMesh::resolve_firmware_version_(uint8_t &major, uint8_t &minor,
                                                uint8_t &patch) const {
   if (this->advertised_identity_current_()) {
     major = this->advertised_firmware_major_.load();
@@ -191,11 +183,12 @@ bool NightmatiqMesh::resolve_firmware_version_(uint8_t &major, uint8_t &minor,
   return false;
 }
 
-bool NightmatiqMesh::parse_scan_result_(const esp32_ble::BLEScanResult &result) {
+bool SteinelMesh::parse_scan_result_(const esp32_ble::BLEScanResult &result) {
   if (!this->identity_scan_pending_.load())
     return false;
 
   const size_t total_length = static_cast<size_t>(result.adv_data_len) + result.scan_rsp_len;
+  if (total_length > sizeof(result.ble_adv)) return false;
   size_t offset = 0;
   while (offset < total_length) {
     const uint8_t field_length = result.ble_adv[offset++];
@@ -215,13 +208,23 @@ bool NightmatiqMesh::parse_scan_result_(const esp32_ble::BLEScanResult &result) 
                                 (static_cast<uint16_t>(value[1]) << 8);
     if (company_id != STEINEL_COMPANY_ID)
       continue;
+    if (!this->legacy_profile_ && value_length >= 9 &&
+        protocol::le16(value + 2) == NIGHTMATIQ_PRODUCT_ID) {
+      if (this->identity_advertiser_seen_ &&
+          std::memcmp(this->identity_advertiser_.data(), result.bda, 6) != 0) {
+        this->identity_advertiser_conflict_ = true;
+        continue;
+      }
+      std::memcpy(this->identity_advertiser_.data(), result.bda, 6);
+      this->identity_advertiser_seen_ = true;
+    }
     if (this->capture_advertised_identity_(value + 2, value_length - 2, result.rssi))
       return true;
   }
   return false;
 }
 
-void NightmatiqMesh::gap_scan_event_handler(const esp32_ble::BLEScanResult &scan_result) {
+void SteinelMesh::gap_scan_event_handler(const esp32_ble::BLEScanResult &scan_result) {
   if (scan_result.search_evt == ESP_GAP_SEARCH_INQ_CMPL_EVT) {
     this->identity_scan_stop_ready_.store(true);
     return;
@@ -229,7 +232,7 @@ void NightmatiqMesh::gap_scan_event_handler(const esp32_ble::BLEScanResult &scan
   this->parse_scan_result_(scan_result);
 }
 
-void NightmatiqMesh::gap_event_handler(esp_gap_ble_cb_event_t event,
+void SteinelMesh::gap_event_handler(esp_gap_ble_cb_event_t event,
                                        esp_ble_gap_cb_param_t *param) {
   if (!this->identity_scan_pending_.load() || param == nullptr)
     return;
@@ -256,7 +259,7 @@ void NightmatiqMesh::gap_event_handler(esp_gap_ble_cb_event_t event,
   }
 }
 
-bool NightmatiqMesh::capture_advertised_identity_(const uint8_t *data, size_t length, int16_t rssi) {
+bool SteinelMesh::capture_advertised_identity_(const uint8_t *data, size_t length, int16_t rssi) {
   if (data == nullptr || length < 7)
     return false;
   const uint16_t product_id = static_cast<uint16_t>(data[0]) |
@@ -287,8 +290,10 @@ bool NightmatiqMesh::capture_advertised_identity_(const uint8_t *data, size_t le
   return true;
 }
 
-void NightmatiqMesh::begin_identity_scan_() {
+void SteinelMesh::begin_identity_scan_() {
   this->identity_found_this_boot_.store(false);
+  this->identity_advertiser_seen_ = false;
+  this->identity_advertiser_conflict_ = false;
   this->advertised_identity_fresh_.store(false);
   this->identity_scan_started_ = false;
   this->identity_scan_phase_ = IdentityScanPhase::WAIT_FOR_BLE;
@@ -309,7 +314,7 @@ void NightmatiqMesh::begin_identity_scan_() {
   this->set_status_("Reading NightmatIQ device report");
 }
 
-void NightmatiqMesh::advance_identity_scan_() {
+void SteinelMesh::advance_identity_scan_() {
   if (!this->identity_scan_pending_.load())
     return;
   const uint32_t now = millis();
@@ -386,7 +391,8 @@ void NightmatiqMesh::advance_identity_scan_() {
       ESP_LOGI(TAG, "Active NightmatIQ identity scan started with a random scanner address");
       return;
     case IdentityScanPhase::RUNNING:
-      if (!this->identity_found_this_boot_.load() && !this->identity_scan_stop_ready_.load())
+      if ((!this->legacy_profile_ || !this->identity_found_this_boot_.load()) &&
+          !this->identity_scan_stop_ready_.load())
         return;
       if (!this->identity_scan_stop_ready_.load()) {
         const esp_err_t error = esp_ble_gap_stop_scanning();
@@ -406,7 +412,14 @@ void NightmatiqMesh::advance_identity_scan_() {
   }
 }
 
-void NightmatiqMesh::finish_identity_scan_() {
+void SteinelMesh::finish_identity_scan_() {
+  if (this->identity_advertiser_conflict_) {
+    this->identity_found_this_boot_.store(false);
+    this->advertised_identity_fresh_.store(false);
+    this->advertised_identity_save_pending_.store(false);
+    this->advertised_identity_valid_.store(false);
+    ESP_LOGW(TAG, "Multiple NightmatIQ advertisers; ignoring ambiguous identity data");
+  }
   if (!this->identity_found_this_boot_.load())
     ESP_LOGW(TAG, "NightmatIQ device report was not received during the active scan window");
   this->identity_scan_pending_.store(false);
@@ -417,7 +430,9 @@ void NightmatiqMesh::finish_identity_scan_() {
   this->set_status_("Preparing Bluetooth Mesh");
 }
 
-void NightmatiqMesh::persist_pending_advertised_identity_() {
+void SteinelMesh::persist_pending_advertised_identity_() {
+  if (this->identity_scan_pending_.load() ||
+      (!this->legacy_profile_ && this->identity_node_address_ != this->config_.onoff_address)) return;
   if (!this->advertised_identity_save_pending_.exchange(false))
     return;
   StoredAdvertisedIdentity identity{};
@@ -433,13 +448,12 @@ void NightmatiqMesh::persist_pending_advertised_identity_() {
     ESP_LOGW(TAG, "Could not persist advertised NightmatIQ identity");
 }
 
-bool NightmatiqMesh::initialize_bluetooth_() {
+bool SteinelMesh::initialize_bluetooth_() {
   esp_err_t error;
   esp_bt_controller_status_t controller_status = esp_bt_controller_get_status();
 
   if (controller_status == ESP_BT_CONTROLLER_STATUS_IDLE) {
-    // Classic Bluetooth is unused. Ignore "already released" on installations
-    // where ESPHome initialized the shared BLE host before this component.
+    // Classic Bluetooth is unused; tolerate an already-released shared host.
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     esp_bt_controller_config_t controller_config = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     error = esp_bt_controller_init(&controller_config);
@@ -483,7 +497,7 @@ bool NightmatiqMesh::initialize_bluetooth_() {
          esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED;
 }
 
-bool NightmatiqMesh::initialize_mesh_() {
+bool SteinelMesh::initialize_mesh_() {
   const uint8_t *address = esp_bt_dev_get_address();
   if (address == nullptr) {
     ESP_LOGE(TAG, "Bluetooth device address is unavailable");
@@ -502,13 +516,11 @@ bool NightmatiqMesh::initialize_mesh_() {
   config_server.friend_state = ESP_BLE_MESH_FRIEND_NOT_SUPPORTED;
   config_server.default_ttl = MESSAGE_TTL;
 
-  composition.cid = 0x02E5;  // Espressif company identifier used by their examples.
+  composition.cid = 0x02E5;  // Espressif company identifier.
   composition.element_count = sizeof(elements) / sizeof(elements[0]);
   composition.elements = elements;
 
-  // prov_unicast_addr is const in ESP-IDF. Build the provisioning context only
-  // after the saved network has been loaded, so the runtime-selected free
-  // address is initialized legally instead of assigned after construction.
+  // Initialize const prov_unicast_addr after loading the saved network address.
   if (provision != nullptr) {
     ESP_LOGE(TAG, "Bluetooth Mesh provisioning context is already initialized");
     this->set_status_("Bluetooth Mesh provisioning context is already initialized");
@@ -532,12 +544,12 @@ bool NightmatiqMesh::initialize_mesh_() {
     return false;
   }
 
-  esp_ble_mesh_register_prov_callback(NightmatiqMesh::provisioning_callback);
-  esp_ble_mesh_register_config_client_callback(NightmatiqMesh::config_callback);
-  esp_ble_mesh_register_generic_client_callback(NightmatiqMesh::generic_callback);
-  esp_ble_mesh_register_sensor_client_callback(NightmatiqMesh::sensor_callback);
-  esp_ble_mesh_register_light_client_callback(NightmatiqMesh::light_callback);
-  esp_ble_mesh_register_time_scene_client_callback(NightmatiqMesh::scene_callback);
+  esp_ble_mesh_register_prov_callback(SteinelMesh::provisioning_callback);
+  esp_ble_mesh_register_config_client_callback(SteinelMesh::config_callback);
+  esp_ble_mesh_register_generic_client_callback(SteinelMesh::generic_callback);
+  esp_ble_mesh_register_sensor_client_callback(SteinelMesh::sensor_callback);
+  esp_ble_mesh_register_light_client_callback(SteinelMesh::light_callback);
+  esp_ble_mesh_register_time_scene_client_callback(SteinelMesh::scene_callback);
 
   this->set_status_("Initializing ESP-BLE-MESH core");
   esp_err_t error = esp_ble_mesh_init(provision, &composition);
@@ -548,24 +560,18 @@ bool NightmatiqMesh::initialize_mesh_() {
     provision = nullptr;
     return false;
   }
-  // From this point the Mesh core must be deinitialized explicitly even if a
-  // later bearer or key-import step fails.
+  // Deinitialize the Mesh core on any subsequent startup failure.
   this->mesh_started_ = true;
-  // ESP-IDF restores persisted model bindings after initializing the Config
-  // Client and can overwrite its mandatory DeviceKey binding with an unused
-  // value. Configuration messages are DeviceKey-only; restore the SIG-defined
-  // binding explicitly after the settings load has completed.
+  // Restored NVS bindings can overwrite the Config Client's DeviceKey binding.
+  // Restore its mandatory SIG binding after settings load.
   if (config_client.model != nullptr)
     config_client.model->keys[0] = ESP_BLE_MESH_KEY_DEV;
   this->live_iv_index_.store(this->config_.iv_index);
   this->live_iv_index_confirmed_.store(false);
   this->iv_index_check_at_ = millis() + 1000;
 
-  // ESP-IDF persists the provisioner's primary address independently of the
-  // application configuration.  A value restored from Mesh NVS takes
-  // precedence over prov_unicast_addr, so explicitly synchronize it before
-  // enabling the provisioner bearer.  The bearer is enabled from the
-  // completion callback to preserve the required asynchronous ordering.
+  // Mesh NVS's primary address overrides prov_unicast_addr; synchronize it first.
+  // Enable the bearer from the completion callback to preserve async ordering.
   this->set_status_("Synchronizing Bluetooth Mesh provisioner address");
   error = esp_ble_mesh_provisioner_set_primary_elem_addr(this->config_.local_address);
   if (error != ESP_OK) {
@@ -576,7 +582,7 @@ bool NightmatiqMesh::initialize_mesh_() {
   return true;
 }
 
-bool NightmatiqMesh::deinitialize_mesh_(bool erase_flash) {
+bool SteinelMesh::deinitialize_mesh_(bool erase_flash) {
   if (!this->mesh_started_)
     return true;
 
@@ -593,8 +599,7 @@ bool NightmatiqMesh::deinitialize_mesh_(bool erase_flash) {
   this->composition_query_pending_.store(false);
   this->composition_query_in_flight_.store(false);
 
-  // ESP-IDF requires every client model to be deinitialized before the Mesh
-  // core. The configuration server at index 0 is owned by the core itself.
+  // Deinitialize client models before the core-owned configuration server.
   esp_err_t first_error = ESP_OK;
   for (size_t index = 1; index < sizeof(root_models) / sizeof(root_models[0]); index++) {
     const esp_err_t error = esp_ble_mesh_client_model_deinit(&root_models[index]);
@@ -617,6 +622,7 @@ bool NightmatiqMesh::deinitialize_mesh_(bool erase_flash) {
   delete provision;
   provision = nullptr;
   this->mesh_started_ = false;
+  this->update_radio_coexistence_();
   this->mesh_start_pending_ = false;
   this->live_iv_index_confirmed_.store(false);
   if (first_error != ESP_OK)
@@ -624,15 +630,14 @@ bool NightmatiqMesh::deinitialize_mesh_(bool erase_flash) {
   return true;
 }
 
-bool NightmatiqMesh::restore_target_node_() {
+bool SteinelMesh::restore_target_node_() {
+  if (this->catalog_valid_) return this->restore_catalog_();
   if (esp_ble_mesh_provisioner_get_node_with_addr(this->config_.onoff_address) != nullptr)
     return true;
 
   esp_ble_mesh_node_t node{};
   node.unicast_addr = this->config_.onoff_address;
-  // NightmatIQ Plus has three elements in the authenticated Steinel backup.
-  // The provisioner checks this range before it permits any unicast Access
-  // message or accepts a response from the device.
+  // Legacy NightmatIQ has three elements; register the full provisioner address range.
   node.element_num = 3;
   node.net_idx = this->config_.net_key_index;
   node.flags = 0;
@@ -655,7 +660,107 @@ bool NightmatiqMesh::restore_target_node_() {
   return true;
 }
 
-void NightmatiqMesh::advance_mesh_start_() {
+esp_ble_mesh_model_t *SteinelMesh::node_model_(uint8_t kind) {
+  if (kind == 0) return &root_models[1];
+  if (kind == 1 || kind == 7) return &root_models[2];
+  if (kind == 6 || kind == 12 || kind == 13) return &root_models[3];
+  if (kind == 255) return &root_models[4];
+  if (kind == 2 || kind == 8) return &root_models[6];
+  return &root_models[5];
+}
+
+bool SteinelMesh::clear_diagnostic_groups_() {
+  while (this->diagnostic_group_count_ != 0) {
+    const uint16_t group = this->diagnostic_groups_[this->diagnostic_group_count_ - 1];
+    if (esp_ble_mesh_model_unsubscribe_group_addr(this->config_.local_address, ESP_BLE_MESH_CID_NVAL,
+                                                ESP_BLE_MESH_MODEL_ID_SENSOR_CLI, group) != ESP_OK) return false;
+    this->diagnostic_groups_[--this->diagnostic_group_count_] = 0;
+  }
+  return true;
+}
+
+bool SteinelMesh::prepare_diagnostic_groups_(const protocol::Node &node) {
+  if (!this->clear_diagnostic_groups_()) return false;
+  std::array<uint16_t, protocol::MAX_GROUPS> groups{};
+  size_t count = 0;
+  for (size_t i = 0; i < this->catalog_.count; ++i) {
+    const auto &selected = this->catalog_.nodes[i];
+    if (!selected.selected) continue;
+    for (size_t j = 0; j < selected.element_count; ++j)
+      if (!protocol::add_group(groups, count, selected.elements[j].sensor_group)) return false;
+  }
+  const size_t selected_count = count;
+  for (size_t j = 0; j < node.element_count; ++j)
+    if (!protocol::add_group(groups, count, node.elements[j].sensor_group)) return false;
+  for (size_t i = selected_count; i < count; ++i) {
+    if (esp_ble_mesh_model_subscribe_group_addr(this->config_.local_address, ESP_BLE_MESH_CID_NVAL,
+                                              ESP_BLE_MESH_MODEL_ID_SENSOR_CLI, groups[i]) != ESP_OK) {
+      this->clear_diagnostic_groups_(); return false;
+    }
+    this->diagnostic_groups_[this->diagnostic_group_count_++] = groups[i];
+  }
+  return true;
+}
+
+void SteinelMesh::expire_diagnostic_groups_(uint32_t now) {
+  std::lock_guard<std::mutex> lock(this->node_mutex_);
+  if (!this->device_diagnostics_.active(now) && this->diagnostic_group_count_ != 0)
+    this->clear_diagnostic_groups_();
+}
+
+bool SteinelMesh::restore_diagnostic_node_(size_t index) {
+  if (index >= this->catalog_.count) return false;
+  const auto &entry = this->catalog_.nodes[index];
+  const auto *existing = esp_ble_mesh_provisioner_get_node_with_addr(entry.address);
+  if (existing != nullptr)
+    return existing->element_num == entry.element_count && std::memcmp(existing->dev_key, entry.device_key.data(), 16) == 0;
+  esp_ble_mesh_node_t node{};
+  node.unicast_addr = entry.address; node.element_num = entry.element_count;
+  node.net_idx = this->config_.net_key_index; node.iv_index = this->config_.iv_index;
+  std::memcpy(node.dev_uuid, entry.uuid.data(), 16);
+  const std::array<uint8_t, 16> empty{};
+  if (entry.uuid == empty) {
+    std::memcpy(node.dev_uuid, this->catalog_.mesh_uuid.data(), 16);
+    node.dev_uuid[14] ^= entry.address >> 8; node.dev_uuid[15] ^= entry.address;
+  }
+  std::memcpy(node.dev_key, entry.device_key.data(), 16);
+  // The restore entry point populates RAM only; it does not provision or persist a node.
+  return bt_mesh_provisioner_restore_node_info(reinterpret_cast<bt_mesh_node *>(&node)) == 0;
+}
+
+bool SteinelMesh::restore_catalog_() {
+  for (size_t i = 0; i < this->catalog_.count; ++i) {
+    const auto &entry = this->catalog_.nodes[i];
+    if (!entry.selected && entry.address != this->config_.onoff_address) continue;
+    const auto *existing = esp_ble_mesh_provisioner_get_node_with_addr(entry.address);
+    if (existing != nullptr) {
+      if (existing->element_num != entry.element_count ||
+          std::memcmp(existing->dev_key, entry.device_key.data(), 16) != 0) {
+        this->set_status_("Stored Mesh device does not match the imported catalog"); return false;
+      }
+      continue;
+    }
+    esp_ble_mesh_node_t node{};
+    node.unicast_addr = entry.address;
+    node.element_num = entry.element_count;
+    node.net_idx = this->config_.net_key_index;
+    node.iv_index = this->config_.iv_index;
+    std::memcpy(node.dev_uuid, entry.uuid.data(), 16);
+    const std::array<uint8_t, 16> empty{};
+    if (entry.uuid == empty) {
+      std::memcpy(node.dev_uuid, this->catalog_.mesh_uuid.data(), 16);
+      node.dev_uuid[14] ^= entry.address >> 8; node.dev_uuid[15] ^= entry.address;
+    }
+    std::memcpy(node.dev_key, entry.device_key.data(), 16);
+    std::strncpy(node.name, entry.name, sizeof(node.name) - 1);
+    if (bt_mesh_provisioner_restore_node_info(reinterpret_cast<bt_mesh_node *>(&node)) != 0) {
+      this->set_status_("Could not restore selected Mesh device"); return false;
+    }
+  }
+  return true;
+}
+
+void SteinelMesh::advance_mesh_start_() {
   if (!this->mesh_start_pending_)
     return;
 
@@ -687,7 +792,7 @@ void NightmatiqMesh::advance_mesh_start_() {
   }
 }
 
-void NightmatiqMesh::advance_mesh_remove_() {
+void SteinelMesh::advance_mesh_remove_() {
   if (!this->mesh_remove_pending_.load())
     return;
   if (static_cast<int32_t>(millis() - this->mesh_remove_not_before_) < 0)
@@ -704,7 +809,7 @@ void NightmatiqMesh::advance_mesh_remove_() {
   this->set_status_("Configuration removed; gateway ready for setup");
 }
 
-void NightmatiqMesh::advance_factory_reset_() {
+void SteinelMesh::advance_factory_reset_() {
   if (!this->factory_reset_pending_.load() ||
       static_cast<int32_t>(millis() - this->factory_reset_at_) < 0)
     return;
@@ -720,7 +825,7 @@ void NightmatiqMesh::advance_factory_reset_() {
   reboot_after_confirming_firmware();
 }
 
-void NightmatiqMesh::monitor_iv_index_() {
+void SteinelMesh::monitor_iv_index_() {
   if (!this->mesh_started_)
     return;
   const uint32_t now = millis();
@@ -730,10 +835,8 @@ void NightmatiqMesh::monitor_iv_index_() {
 
   const uint32_t live_iv_index = bt_mesh.iv_index;
   this->live_iv_index_.store(live_iv_index);
-  // A changed value has passed Secure Network Beacon authentication inside
-  // ESP-IDF. A successfully decoded Access response independently proves that
-  // the current value is usable even when it equals the imported starting
-  // value.
+  // A changed IV Index is beacon-authenticated by ESP-IDF;
+  // an Access reply also confirms an unchanged imported value.
   const bool authenticated = live_iv_index != this->config_.iv_index ||
                              this->mesh_rx_messages_.load() > 0;
   if (!authenticated)
@@ -756,7 +859,7 @@ void NightmatiqMesh::monitor_iv_index_() {
   }
 }
 
-bool NightmatiqMesh::valid_admin_password_(const std::string &password) {
+bool SteinelMesh::valid_admin_password_(const std::string &password) {
   if (password.size() < ADMIN_PASSWORD_MIN_LENGTH ||
       password.size() > ADMIN_PASSWORD_MAX_LENGTH)
     return false;
@@ -765,7 +868,7 @@ bool NightmatiqMesh::valid_admin_password_(const std::string &password) {
   });
 }
 
-bool NightmatiqMesh::load_admin_credentials_() {
+bool SteinelMesh::load_admin_credentials_() {
   StoredAdminCredentials stored{};
   if (!this->admin_credentials_preference_.load(&stored) ||
       stored.magic != ADMIN_CREDENTIALS_MAGIC ||
@@ -786,7 +889,7 @@ bool NightmatiqMesh::load_admin_credentials_() {
   return true;
 }
 
-bool NightmatiqMesh::save_admin_password_(const std::string &password) {
+bool SteinelMesh::save_admin_password_(const std::string &password) {
   if (!valid_admin_password_(password))
     return false;
 
@@ -803,14 +906,14 @@ bool NightmatiqMesh::save_admin_password_(const std::string &password) {
   return true;
 }
 
-void NightmatiqMesh::apply_admin_credentials_() {
+void SteinelMesh::apply_admin_credentials_() {
   this->base_->set_auth_username(this->web_username_);
   this->base_->set_auth_password(this->web_password_);
   if (this->ota_ != nullptr)
     this->ota_->set_auth_password(this->web_password_);
 }
 
-void NightmatiqMesh::setup() {
+void SteinelMesh::setup() {
   ESP_LOGCONFIG(TAG, "Setting up NightmatIQ cloud and Bluetooth Mesh client");
   this->instance_ = this;
   this->config_preference_ = global_preferences->make_preference<StoredConfig>(0x4E4D5101U);
@@ -828,6 +931,9 @@ void NightmatiqMesh::setup() {
       global_preferences->make_preference<StoredAdminCredentials>(0x4E4D5108U);
   this->auto_update_preference_ =
       global_preferences->make_preference<StoredAutoUpdate>(0x4E4D5109U);
+  this->catalog_preference_ = global_preferences->make_preference<protocol::Catalog>(0x4E4D5110U);
+  this->import_guard_preference_ = global_preferences->make_preference<bool>(0x4E4D5111U);
+  this->functions_preference_ = global_preferences->make_preference<StoredFunctions>(0x4E4D5112U);
   this->load_admin_credentials_();
   this->apply_admin_credentials_();
   this->base_->add_handler(this);
@@ -838,29 +944,55 @@ void NightmatiqMesh::setup() {
   this->load_address_confirmation_();
   if (this->ready_binary_sensor_ != nullptr)
     this->ready_binary_sensor_->publish_state(false);
-  const bool has_config = this->load_config_();
+  bool interrupted_import = false;
+  this->import_guard_preference_.load(&interrupted_import);
+  const bool has_config = !interrupted_import && this->load_config_();
+  if (interrupted_import && !auto_update_pending) {
+    this->set_status_("Import was interrupted. Import the network again before enabling Mesh.");
+    return;
+  }
   if (has_config) {
     this->load_device_key_();
+    this->load_catalog_();
+    if (!this->catalog_valid_ && (this->config_.flags & FLAG_DEVICE_CATALOG) && !auto_update_pending) {
+      this->mesh_mode_enabled_ = false;
+      this->set_status_("Stored device catalog is invalid. Import the network again.");
+      return;
+    }
     this->mesh_mode_enabled_ =
         (this->config_.flags & (FLAG_ENABLED | FLAG_REMOVE_PENDING)) != 0;
+    this->setup_node_entities_();
   }
   if (auto_update_pending) {
     this->set_status_("Firmware update pending; waiting for network");
     return;
   }
   if (!has_config) {
-    this->set_status_("Gateway ready; configure NightmatIQ on this page");
+    this->set_status_("Gateway ready; import a Steinel Mesh network on this page");
     return;
   }
   if (!this->mesh_mode_enabled_) {
-    this->set_status_("NightmatIQ disabled; gateway in setup mode");
+    this->set_status_("Mesh disabled; gateway in setup mode");
     return;
   }
   this->actual_output_forced_unavailable_.store(false);
-  this->begin_identity_scan_();
+  this->identity_node_address_ = this->legacy_profile_ ? this->config_.onoff_address : 0;
+  if (this->catalog_valid_) {
+    size_t candidates = 0;
+    for (size_t i = 0; i < this->catalog_.count; ++i) {
+      const auto &node = this->catalog_.nodes[i];
+      if (node.nightmatiq) {
+        ++candidates;
+        if (node.selected) this->identity_node_address_ = node.address;
+      }
+    }
+    if (candidates != 1) this->identity_node_address_ = 0;
+  }
+  if (this->identity_node_address_ != 0) this->begin_identity_scan_();
+  else this->mesh_start_pending_ = true;
 }
 
-void NightmatiqMesh::dump_config() {
+void SteinelMesh::dump_config() {
   ESP_LOGCONFIG(TAG, "NightmatIQ Bluetooth Mesh:");
   ESP_LOGCONFIG(TAG, "  Configuration: %s", YESNO(this->configured_));
   if (!this->configured_)
@@ -884,7 +1016,7 @@ void NightmatiqMesh::dump_config() {
   ESP_LOGCONFIG(TAG, "  Mesh models ready: %s", YESNO(this->mesh_ready_.load()));
 }
 
-bool NightmatiqMesh::set_common_(esp_ble_mesh_client_common_param_t &common, esp_ble_mesh_model_t *model,
+bool SteinelMesh::set_common_(esp_ble_mesh_client_common_param_t &common, esp_ble_mesh_model_t *model,
                                  uint32_t opcode, uint16_t destination) {
   if (!this->mesh_ready_.load() || model == nullptr)
     return false;
@@ -902,7 +1034,7 @@ bool NightmatiqMesh::set_common_(esp_ble_mesh_client_common_param_t &common, esp
   return true;
 }
 
-bool NightmatiqMesh::record_send_result_(esp_err_t result) {
+bool SteinelMesh::record_send_result_(esp_err_t result) {
   this->mesh_tx_attempts_.fetch_add(1);
   this->mesh_last_tx_error_.store(result);
   if (result == ESP_OK) {
@@ -913,7 +1045,7 @@ bool NightmatiqMesh::record_send_result_(esp_err_t result) {
   return false;
 }
 
-bool NightmatiqMesh::begin_access_operation_(AccessOperation operation, uint32_t opcode) {
+bool SteinelMesh::begin_access_operation_(AccessOperation operation, uint32_t opcode) {
   AccessOperation expected = AccessOperation::NONE;
   if (!this->access_operation_.compare_exchange_strong(expected, operation)) {
     ESP_LOGW(TAG, "Access request 0x%08" PRIX32 " deferred; another acknowledged request is active",
@@ -925,7 +1057,7 @@ bool NightmatiqMesh::begin_access_operation_(AccessOperation operation, uint32_t
   return true;
 }
 
-bool NightmatiqMesh::record_access_send_result_(AccessOperation operation, uint32_t opcode,
+bool SteinelMesh::record_access_send_result_(AccessOperation operation, uint32_t opcode,
                                                 esp_err_t result) {
   const bool accepted = this->record_send_result_(result);
   if (!accepted)
@@ -933,16 +1065,14 @@ bool NightmatiqMesh::record_access_send_result_(AccessOperation operation, uint3
   return accepted;
 }
 
-bool NightmatiqMesh::complete_access_operation_(uint32_t opcode, bool success) {
+bool SteinelMesh::complete_access_operation_(uint32_t opcode, bool success) {
   if (this->access_opcode_.load() != opcode)
     return false;
   const AccessOperation operation = this->access_operation_.load();
   if (operation == AccessOperation::NONE)
     return false;
 
-  // Publish the completion before releasing the global access slot. The main
-  // loop can then safely advance a control transaction as soon as it observes
-  // NONE, without racing a stale result from the callback task.
+  // Publish completion before releasing the slot to prevent callback/loop races.
   this->access_last_completed_.store(operation);
   this->access_last_success_.store(success);
   this->access_opcode_.store(0);
@@ -950,19 +1080,21 @@ bool NightmatiqMesh::complete_access_operation_(uint32_t opcode, bool success) {
   return true;
 }
 
-void NightmatiqMesh::expire_access_operation_(uint32_t now) {
+void SteinelMesh::expire_access_operation_(uint32_t now) {
   const AccessOperation operation = this->access_operation_.load();
   if (operation == AccessOperation::NONE ||
       static_cast<int32_t>(now - this->access_deadline_.load()) < 0)
     return;
   const uint32_t opcode = this->access_opcode_.load();
   if (this->complete_access_operation_(opcode, false)) {
-    this->mesh_timeouts_.fetch_add(1);
+    if (operation == AccessOperation::NODE) this->finish_node_request_(false);
+    if (operation != AccessOperation::NODE || !this->active_node_request_.diagnostic)
+      this->mesh_timeouts_.fetch_add(1);
     ESP_LOGW(TAG, "Access request watchdog expired for opcode 0x%08" PRIX32, opcode);
   }
 }
 
-void NightmatiqMesh::bind_model_(uint16_t model_id) {
+void SteinelMesh::bind_model_(uint16_t model_id) {
   const uint16_t local_address = esp_ble_mesh_get_primary_element_address();
   if (local_address == ESP_BLE_MESH_ADDR_UNASSIGNED) {
     ESP_LOGE(TAG, "Cannot bind AppKey to model 0x%04X: local primary element is unassigned", model_id);
@@ -978,30 +1110,55 @@ void NightmatiqMesh::bind_model_(uint16_t model_id) {
     ESP_LOGE(TAG, "Local AppKey bind request for model 0x%04X failed: %s", model_id, esp_err_to_name(error));
 }
 
-void NightmatiqMesh::mark_ready_() {
+void SteinelMesh::mark_ready_() {
+  if (this->catalog_valid_) {
+    std::array<uint16_t, protocol::MAX_GROUPS> groups{};
+    size_t count = 0;
+    for (size_t i = 0; i < this->catalog_.count; ++i) {
+      const auto &node = this->catalog_.nodes[i];
+      if (!node.selected) continue;
+      for (size_t j = 0; j < node.element_count; ++j)
+        if (!protocol::add_group(groups, count, node.elements[j].sensor_group)) {
+          this->set_status_("Too many sensor publication groups"); return;
+        }
+    }
+    for (uint16_t stored : this->node_model_(6)->groups) {
+      if (!protocol::group(stored) || std::find(groups.begin(), groups.begin() + count, stored) != groups.begin() + count)
+        continue;
+      if (esp_ble_mesh_model_unsubscribe_group_addr(this->config_.local_address, ESP_BLE_MESH_CID_NVAL,
+                                                  ESP_BLE_MESH_MODEL_ID_SENSOR_CLI, stored) != ESP_OK) {
+        this->keys_bound_pending_ = true; this->keys_bound_at_ = millis() + 1000;
+        this->set_status_("Waiting to clear sensor publication groups"); return;
+      }
+    }
+    for (size_t i = 0; i < count; ++i)
+      if (esp_ble_mesh_model_subscribe_group_addr(this->config_.local_address, ESP_BLE_MESH_CID_NVAL,
+                                                ESP_BLE_MESH_MODEL_ID_SENSOR_CLI, groups[i]) != ESP_OK)
+        ESP_LOGW(TAG, "Could not subscribe sensor group 0x%04X; polling remains available", groups[i]);
+  }
   this->mesh_ready_.store(true);
   this->mesh_ready_at_ = millis();
   this->address_recovery_attempted_this_boot_ = false;
   this->ready_publish_pending_.store(true);
-  this->set_status_("Mesh client ready; polling NightmatIQ");
+  this->set_status_("Mesh client ready; polling selected devices");
   ESP_LOGI(TAG, "NightmatIQ mesh keys imported and all client models bound");
-  if (this->device_key_valid_) {
+  if (this->device_key_valid_ && this->legacy_profile_) {
     this->composition_query_attempts_.store(0);
     this->composition_query_failures_.store(0);
     this->composition_query_at_.store(millis() + 500);
     this->composition_query_pending_.store(true);
-  } else {
+  } else if (this->legacy_profile_) {
     ESP_LOGW(TAG, "NightmatIQ DeviceKey is not stored; live product/version read is unavailable until reimport");
   }
 }
 
-void NightmatiqMesh::advance_address_recovery_(uint32_t now) {
+void SteinelMesh::advance_address_recovery_(uint32_t now) {
   if (this->address_recovery_attempted_this_boot_ || !this->mesh_ready_.load() ||
       !this->configured_ || !this->mesh_mode_enabled_ ||
       !this->address_policy_valid_ || this->current_address_confirmed_() ||
       this->mesh_ready_at_ == 0 ||
       static_cast<uint32_t>(now - this->mesh_ready_at_) < AUTO_ADDRESS_RECOVERY_DELAY_MS ||
-      !this->identity_found_this_boot_.load() ||
+      (this->legacy_profile_ && !this->identity_found_this_boot_.load()) ||
       this->mesh_rx_messages_.load() != 0 ||
       this->mesh_tx_accepted_.load() < AUTO_ADDRESS_MIN_ACCEPTED_TX ||
       this->mesh_timeouts_.load() < AUTO_ADDRESS_MIN_TIMEOUTS ||
@@ -1018,11 +1175,9 @@ void NightmatiqMesh::advance_address_recovery_(uint32_t now) {
   }
 }
 
-void NightmatiqMesh::keys_bound_() {
-  // A newly imported value has not been authenticated yet, so give the stack
-  // time to recover a newer IV Index from a Secure Network Beacon. Once an
-  // authenticated Access response (or beacon update) has confirmed it, retain
-  // that fact across gateway restarts and start normal polling promptly.
+void SteinelMesh::keys_bound_() {
+  // Allow beacon recovery for a newly imported IV Index;
+  // retain authentication across restarts to resume polling promptly.
   const bool previously_confirmed =
       (this->config_.flags & FLAG_IV_INDEX_CONFIRMED) != 0;
   this->keys_bound_pending_ = true;
@@ -1032,9 +1187,9 @@ void NightmatiqMesh::keys_bound_() {
                         : "Mesh keys loaded; synchronizing IV Index");
 }
 
-void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
+void SteinelMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
                                            esp_ble_mesh_prov_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr)
     return;
 
@@ -1063,9 +1218,7 @@ void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
         self->set_status_(std::string("Mesh advertising bearer enable failed: ") + esp_err_to_name(result));
         return;
       }
-      // The provisioner creates its reserved primary NetKey asynchronously.
-      // Import the Steinel key only after PROV_ENABLE_COMP_EVT because
-      // add_local_net_key explicitly rejects the reserved primary index (0).
+      // Wait for PROV_ENABLE_COMP_EVT: the reserved primary NetKey is created asynchronously.
       self->set_status_("Waiting for Bluetooth Mesh provisioner");
       break;
     }
@@ -1080,10 +1233,8 @@ void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
       self->set_status_("Importing primary Mesh key");
       const uint16_t net_idx = self->config_.net_key_index;
       const uint8_t *existing_net_key = esp_ble_mesh_provisioner_get_local_net_key(net_idx);
-      // ESP-IDF reserves index 0 as ESP_BLE_MESH_KEY_PRIMARY and forbids
-      // add_local_net_key() for it. The primary key always exists after the
-      // provisioner-enable completion event, so replace it with the Steinel
-      // key. Non-primary networks retain normal add/update semantics.
+      // ESP-IDF forbids add_local_net_key() at the reserved primary index 0.
+      // Replace the existing primary key; use add/update for other indices.
       const esp_err_t result =
           net_idx == ESP_BLE_MESH_KEY_PRIMARY || existing_net_key != nullptr
               ? esp_ble_mesh_provisioner_update_local_net_key(self->config_.net_key.data(), net_idx)
@@ -1103,9 +1254,7 @@ void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
         ESP_LOGE(TAG, "Primary NetKey import failed: %d", error);
         return;
       }
-      // Provisioner callbacks execute in the ESP-BLE-MESH task. Restore the
-      // target entry here, after the NetKey exists, rather than touching the
-      // private provisioner table from ESPHome's main loop.
+      // Restore provisioner entries in the Mesh callback task after NetKey creation.
       if (!self->restore_target_node_())
         return;
       const uint8_t *existing_app_key =
@@ -1148,6 +1297,8 @@ void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
       else if (binding.model_id == ESP_BLE_MESH_MODEL_ID_SCENE_CLI)
         self->bind_model_(ESP_BLE_MESH_MODEL_ID_LIGHT_LC_CLI);
       else if (binding.model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_LC_CLI)
+        self->bind_model_(ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI);
+      else if (binding.model_id == ESP_BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_CLI)
         self->keys_bound_();
       break;
     }
@@ -1156,14 +1307,13 @@ void NightmatiqMesh::provisioning_callback(esp_ble_mesh_prov_cb_event_t event,
   }
 }
 
-void NightmatiqMesh::config_callback(esp_ble_mesh_cfg_client_cb_event_t event,
+void SteinelMesh::config_callback(esp_ble_mesh_cfg_client_cb_event_t event,
                                      esp_ble_mesh_cfg_client_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr)
     return;
+  if (self->node_composition_event_(event, param)) return;
 
-  // Retain the exact completion reason in the lightweight HTTP diagnostics.
-  // This avoids attaching an API log client on RAM-constrained ESP32 builds.
   self->composition_last_event_.store(static_cast<int32_t>(event));
   self->composition_last_error_.store(param->error_code);
   self->composition_last_opcode_.store(
@@ -1224,8 +1374,7 @@ void NightmatiqMesh::config_callback(esp_ble_mesh_cfg_client_cb_event_t event,
   self->record_mesh_rssi_(param->params->ctx);
 
   if (self->advertised_identity_valid_.load() && self->identity_found_this_boot_.load()) {
-    // Associate the observed Steinel manufacturer advertisement with the
-    // authenticated Composition VID before retaining it across restarts.
+    // Match advertisement metadata to the authenticated VID before persisting it.
     self->advertised_composition_version_id_.store(version_id);
     self->advertised_identity_save_pending_.store(true);
   } else if (self->advertised_identity_valid_.load() &&
@@ -1238,14 +1387,12 @@ void NightmatiqMesh::config_callback(esp_ble_mesh_cfg_client_cb_event_t event,
            company_id, product_id, version_id);
 }
 
-uint8_t NightmatiqMesh::next_tid_() { return ++this->tid_; }
+uint8_t SteinelMesh::next_tid_() { return ++this->tid_; }
 
-bool NightmatiqMesh::send_composition_get_() {
+bool SteinelMesh::send_composition_get_() {
   if (!this->mesh_ready_.load() || !this->device_key_valid_ || config_client.model == nullptr)
     return false;
-  // Keep this invariant local to the operation as well. It protects later
-  // enable/disable cycles from stale ESP-IDF model settings without erasing
-  // any user configuration or requiring a gateway restart.
+  // Restore the mandatory binding after enable/disable cycles without erasing settings.
   config_client.model->keys[0] = ESP_BLE_MESH_KEY_DEV;
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_cfg_client_get_state_t get{};
@@ -1268,7 +1415,7 @@ bool NightmatiqMesh::send_composition_get_() {
   return accepted;
 }
 
-bool NightmatiqMesh::send_sensor_get_() {
+bool SteinelMesh::send_sensor_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_sensor_client_get_state_t get{};
   if (!this->set_common_(common, sensor_client.model, ESP_BLE_MESH_MODEL_OP_SENSOR_GET,
@@ -1284,7 +1431,7 @@ bool NightmatiqMesh::send_sensor_get_() {
       esp_ble_mesh_sensor_client_get_state(&common, &get));
 }
 
-bool NightmatiqMesh::send_device_revision_catalog_get_() {
+bool SteinelMesh::send_device_revision_catalog_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_sensor_client_get_state_t get{};
   if (!this->set_common_(common, sensor_client.model, ESP_BLE_MESH_MODEL_OP_SENSOR_GET,
@@ -1293,10 +1440,6 @@ bool NightmatiqMesh::send_device_revision_catalog_get_() {
   if (!this->begin_access_operation_(AccessOperation::REVISION_CATALOG_GET,
                                      ESP_BLE_MESH_MODEL_OP_SENSOR_GET))
     return false;
-  // A Sensor Get without a Property ID requests every sensor value exposed by
-  // the server. One authenticated response can therefore prove whether the
-  // standard firmware and hardware revision properties exist, without
-  // treating two unanswered optional-property requests as evidence.
   get.sensor_get.op_en = false;
   const bool accepted = this->record_access_send_result_(
       AccessOperation::REVISION_CATALOG_GET, ESP_BLE_MESH_MODEL_OP_SENSOR_GET,
@@ -1305,7 +1448,7 @@ bool NightmatiqMesh::send_device_revision_catalog_get_() {
   return accepted;
 }
 
-bool NightmatiqMesh::send_threshold_get_() {
+bool SteinelMesh::send_threshold_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_light_client_get_state_t get{};
   if (!this->set_common_(common, light_lc_client.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_GET,
@@ -1320,7 +1463,7 @@ bool NightmatiqMesh::send_threshold_get_() {
       esp_ble_mesh_light_client_get_state(&common, &get));
 }
 
-bool NightmatiqMesh::send_lc_mode_get_() {
+bool SteinelMesh::send_lc_mode_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_light_client_get_state_t get{};
   if (!this->set_common_(common, light_lc_client.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_GET,
@@ -1334,12 +1477,9 @@ bool NightmatiqMesh::send_lc_mode_get_() {
       esp_ble_mesh_light_client_get_state(&common, &get));
 }
 
-bool NightmatiqMesh::send_onoff_get_() {
+bool SteinelMesh::send_onoff_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_generic_client_get_state_t get{};
-  // The primary element contains both Generic OnOff Server and Light
-  // Lightness Server. Its Generic OnOff state is therefore the direct state
-  // of the physical light output, not a state inferred from our commands.
   if (!this->set_common_(common, onoff_client.model, ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET,
                          this->config_.onoff_address))
     return false;
@@ -1351,7 +1491,7 @@ bool NightmatiqMesh::send_onoff_get_() {
       esp_ble_mesh_generic_client_get_state(&common, &get));
 }
 
-bool NightmatiqMesh::send_scene_get_() {
+bool SteinelMesh::send_scene_get_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_time_scene_client_get_state_t get{};
   if (!this->set_common_(common, scene_client.model, ESP_BLE_MESH_MODEL_OP_SCENE_GET,
@@ -1365,7 +1505,7 @@ bool NightmatiqMesh::send_scene_get_() {
       esp_ble_mesh_time_scene_client_get_state(&common, &get));
 }
 
-bool NightmatiqMesh::send_threshold_set_(uint32_t centilux) {
+bool SteinelMesh::send_threshold_set_(uint32_t centilux) {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_light_client_set_state_t set{};
   if (!this->set_common_(common, light_lc_client.model, ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET,
@@ -1374,9 +1514,7 @@ bool NightmatiqMesh::send_threshold_set_(uint32_t centilux) {
   if (!this->begin_access_operation_(AccessOperation::THRESHOLD_SET,
                                      ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET))
     return false;
-  // Light LC Ambient LuxLevel On uses the Bluetooth Mesh 24-bit Illuminance
-  // format (0.01 lx resolution), not a 32-bit integer. ESP-IDF does not deep
-  // copy property_value, so its storage must outlive this function.
+  // ESP-IDF retains property_value's pointer; storage must outlive this call.
   this->threshold_set_storage_[0] = centilux & 0xFF;
   this->threshold_set_storage_[1] = (centilux >> 8) & 0xFF;
   this->threshold_set_storage_[2] = (centilux >> 16) & 0xFF;
@@ -1391,7 +1529,7 @@ bool NightmatiqMesh::send_threshold_set_(uint32_t centilux) {
       esp_ble_mesh_light_client_set_state(&common, &set));
 }
 
-bool NightmatiqMesh::send_lc_mode_set_(bool enabled) {
+bool SteinelMesh::send_lc_mode_set_(bool enabled) {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_light_client_set_state_t set{};
   if (!this->set_common_(common, light_lc_client.model,
@@ -1402,7 +1540,7 @@ bool NightmatiqMesh::send_lc_mode_set_(bool enabled) {
   return this->record_send_result_(esp_ble_mesh_light_client_set_state(&common, &set));
 }
 
-bool NightmatiqMesh::send_onoff_set_(bool on) {
+bool SteinelMesh::send_onoff_set_(bool on) {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_generic_client_set_state_t set{};
   if (!this->set_common_(common, onoff_client.model,
@@ -1411,13 +1549,12 @@ bool NightmatiqMesh::send_onoff_set_(bool on) {
     return false;
   set.onoff_set.op_en = false;
   set.onoff_set.onoff = on ? 1 : 0;
-  // Repeated copies of one logical command must use the same TID so the
-  // server treats them as retransmissions, not as separate state changes.
+  // Retransmissions of one logical command share a TID.
   set.onoff_set.tid = this->control_tid_;
   return this->record_send_result_(esp_ble_mesh_generic_client_set_state(&common, &set));
 }
 
-bool NightmatiqMesh::send_scene_recall_() {
+bool SteinelMesh::send_scene_recall_() {
   esp_ble_mesh_client_common_param_t common{};
   esp_ble_mesh_time_scene_client_set_state_t set{};
   if (!this->set_common_(common, scene_client.model,
@@ -1430,8 +1567,8 @@ bool NightmatiqMesh::send_scene_recall_() {
   return this->record_send_result_(esp_ble_mesh_time_scene_client_set_state(&common, &set));
 }
 
-void NightmatiqMesh::set_threshold(float lux) {
-  if (!this->mesh_ready_.load()) {
+void SteinelMesh::set_threshold(float lux) {
+  if (!this->legacy_profile_ || !this->mesh_ready_.load()) {
     ESP_LOGW(TAG, "Threshold ignored because the mesh client is not ready yet");
     return;
   }
@@ -1447,14 +1584,12 @@ void NightmatiqMesh::set_threshold(float lux) {
   this->requested_threshold_centilux_.store(centilux);
   this->threshold_override_pending_.store(true);
   this->threshold_request_sequence_.fetch_add(1);
-  // HA sees the requested value immediately. It is kept only when the device
-  // confirms it; otherwise finish_control_ restores the last verified value.
   this->pending_threshold_centilux_.store(centilux);
   this->threshold_publish_pending_.store(true);
 }
 
-void NightmatiqMesh::set_mode(const std::string &mode) {
-  if (!this->mesh_ready_.load()) {
+void SteinelMesh::set_mode(const std::string &mode) {
+  if (!this->legacy_profile_ || !this->mesh_ready_.load()) {
     ESP_LOGW(TAG, "Mode command ignored because the mesh client is not ready yet");
     return;
   }
@@ -1474,17 +1609,16 @@ void NightmatiqMesh::set_mode(const std::string &mode) {
   this->mode_override_pending_.store(true);
   this->mode_confirmation_deadline_.store(0);
   this->mode_request_sequence_.fetch_add(1);
-  // Do not let an older poll response make the selector jump back while this
-  // acknowledged two-step command is still being applied and verified.
+  // Ignore stale polls while applying and confirming the two-step command.
   this->mode_publish_pending_.store(requested);
 }
 
-bool NightmatiqMesh::control_request_pending_() const {
+bool SteinelMesh::control_request_pending_() const {
   return this->mode_request_sequence_.load() != this->handled_mode_request_sequence_ ||
          this->threshold_request_sequence_.load() != this->handled_threshold_request_sequence_;
 }
 
-void NightmatiqMesh::start_next_control_(uint32_t now) {
+void SteinelMesh::start_next_control_(uint32_t now) {
   if (this->control_kind_ != ControlKind::NONE)
     return;
 
@@ -1511,7 +1645,7 @@ void NightmatiqMesh::start_next_control_(uint32_t now) {
   this->poll_stage_ = 0;
 }
 
-void NightmatiqMesh::finish_control_(bool success, uint32_t now) {
+void SteinelMesh::finish_control_(bool success, uint32_t now) {
   const ControlKind completed = this->control_kind_;
   const bool newer_mode = completed == ControlKind::MODE &&
                           this->mode_request_sequence_.load() !=
@@ -1522,9 +1656,7 @@ void NightmatiqMesh::finish_control_(bool success, uint32_t now) {
 
   if (completed == ControlKind::MODE && !newer_mode) {
     if (success) {
-      // Unacknowledged messages provide immediate physical control. Keep HA's
-      // optimistic selection until the following GETs confirm it or the grace
-      // period expires; a stale poll response must not make the selector jump.
+      // Confirm unacknowledged control with GETs before the optimistic-selection grace expires.
       this->mode_confirmation_deadline_.store(now + MODE_CONFIRMATION_GRACE_MS);
       this->mode_publish_pending_.store(this->requested_mode_.load());
       this->poll_sensor_rx_start_ = this->mesh_sensor_rx_.load();
@@ -1559,7 +1691,7 @@ void NightmatiqMesh::finish_control_(bool success, uint32_t now) {
   this->control_action_at_ = now + 300;
 }
 
-void NightmatiqMesh::retry_or_finish_control_(bool success, uint32_t now) {
+void SteinelMesh::retry_or_finish_control_(bool success, uint32_t now) {
   if (success) {
     this->finish_control_(true, now);
     return;
@@ -1578,7 +1710,7 @@ void NightmatiqMesh::retry_or_finish_control_(bool success, uint32_t now) {
   this->finish_control_(false, now);
 }
 
-void NightmatiqMesh::advance_control_(uint32_t now) {
+void SteinelMesh::advance_control_(uint32_t now) {
   if (this->control_kind_ == ControlKind::NONE) {
     this->start_next_control_(now);
     return;
@@ -1588,8 +1720,7 @@ void NightmatiqMesh::advance_control_(uint32_t now) {
       static_cast<int32_t>(now - this->control_action_at_) < 0)
     return;
 
-  // A newer value of the same entity supersedes the old transaction. Wait
-  // for its current acknowledged message to finish, then restart from step 1.
+  // Wait for the in-flight request before restarting a superseded transaction.
   if (this->control_kind_ == ControlKind::MODE &&
       this->mode_request_sequence_.load() != this->handled_mode_request_sequence_) {
     this->handled_mode_request_sequence_ = this->mode_request_sequence_.load();
@@ -1663,7 +1794,7 @@ void NightmatiqMesh::advance_control_(uint32_t now) {
   }
 }
 
-void NightmatiqMesh::publish_mode_from_observed_() {
+void SteinelMesh::publish_mode_from_observed_() {
   const int8_t lc_mode = this->observed_lc_mode_.load();
   const int8_t onoff = this->observed_onoff_.load();
   if (this->mode_override_pending_.load()) {
@@ -1689,7 +1820,7 @@ void NightmatiqMesh::publish_mode_from_observed_() {
     this->mode_publish_pending_.store(onoff != 0 ? 1 : 2);
 }
 
-void NightmatiqMesh::record_actual_output_(bool on) {
+void SteinelMesh::record_actual_output_(bool on) {
   if (this->actual_output_forced_unavailable_.load())
     return;
   this->observed_onoff_.store(on ? 1 : 0);
@@ -1698,24 +1829,26 @@ void NightmatiqMesh::record_actual_output_(bool on) {
   this->publish_mode_from_observed_();
 }
 
-void NightmatiqMesh::force_actual_output_unavailable_() {
+void SteinelMesh::force_actual_output_unavailable_() {
   this->actual_output_forced_unavailable_.store(true);
   this->actual_output_publish_pending_.store(false);
   this->actual_output_invalidate_pending_.store(true);
 }
 
-void NightmatiqMesh::record_mesh_rssi_(const esp_ble_mesh_msg_ctx_t &context) {
+void SteinelMesh::record_mesh_rssi_(const esp_ble_mesh_msg_ctx_t &context) {
   this->last_mesh_rssi_dbm_.store(context.recv_rssi);
   this->last_mesh_rssi_at_.store(millis());
   this->mesh_rssi_received_.store(true);
   this->mesh_rssi_publish_pending_.store(true);
 }
 
-void NightmatiqMesh::generic_callback(esp_ble_mesh_generic_client_cb_event_t event,
+void SteinelMesh::generic_callback(esp_ble_mesh_generic_client_cb_event_t event,
                                       esp_ble_mesh_generic_client_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (self->node_generic_event_(event, param)) return;
+  if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.onoff_address) return;
   if (event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT) {
     self->mesh_timeouts_.fetch_add(1);
     self->mesh_generic_timeouts_.fetch_add(1);
@@ -1736,11 +1869,13 @@ void NightmatiqMesh::generic_callback(esp_ble_mesh_generic_client_cb_event_t eve
   self->complete_access_operation_(param->params->opcode, true);
 }
 
-void NightmatiqMesh::sensor_callback(esp_ble_mesh_sensor_client_cb_event_t event,
+void SteinelMesh::sensor_callback(esp_ble_mesh_sensor_client_cb_event_t event,
                                      esp_ble_mesh_sensor_client_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (self->node_sensor_event_(event, param)) return;
+  if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.sensor_address) return;
   if (event == ESP_BLE_MESH_SENSOR_CLIENT_TIMEOUT_EVT) {
     self->revision_catalog_in_flight_.store(false);
     self->mesh_timeouts_.fetch_add(1);
@@ -1816,11 +1951,13 @@ void NightmatiqMesh::sensor_callback(esp_ble_mesh_sensor_client_cb_event_t event
   self->complete_access_operation_(param->params->opcode, true);
 }
 
-void NightmatiqMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
+void SteinelMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
                                     esp_ble_mesh_light_client_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (self->node_light_event_(event, param)) return;
+  if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.lc_address) return;
   if (event == ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT) {
     self->mesh_timeouts_.fetch_add(1);
     self->mesh_light_timeouts_.fetch_add(1);
@@ -1858,8 +1995,6 @@ void NightmatiqMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
       const uint32_t centilux = static_cast<uint32_t>(value[0]) |
                                (static_cast<uint32_t>(value[1]) << 8) |
                                (static_cast<uint32_t>(value[2]) << 16);
-      // The public HA entity supports 1..1500 lx. Reject every out-of-range
-      // 24-bit property value before publishing or retaining it.
       if (centilux >= 100 && centilux <= 150000) {
         self->observed_threshold_centilux_.store(centilux);
         self->threshold_response_sequence_.fetch_add(1);
@@ -1878,11 +2013,13 @@ void NightmatiqMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
   self->complete_access_operation_(param->params->opcode, true);
 }
 
-void NightmatiqMesh::scene_callback(esp_ble_mesh_time_scene_client_cb_event_t event,
+void SteinelMesh::scene_callback(esp_ble_mesh_time_scene_client_cb_event_t event,
                                     esp_ble_mesh_time_scene_client_cb_param_t *param) {
-  NightmatiqMesh *self = NightmatiqMesh::instance_;
+  SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (self->node_scene_event_(event, param)) return;
+  if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.onoff_address) return;
   if (event == ESP_BLE_MESH_TIME_SCENE_CLIENT_TIMEOUT_EVT) {
     self->mesh_timeouts_.fetch_add(1);
     self->mesh_scene_timeouts_.fetch_add(1);
@@ -1901,7 +2038,7 @@ void NightmatiqMesh::scene_callback(esp_ble_mesh_time_scene_client_cb_event_t ev
   self->complete_access_operation_(param->params->opcode, success);
 }
 
-void NightmatiqMesh::publish_pending_() {
+void SteinelMesh::publish_pending_() {
   if (this->status_publish_pending_.exchange(false) && this->status_text_sensor_ != nullptr) {
     std::string status;
     {
@@ -2007,7 +2144,8 @@ void NightmatiqMesh::publish_pending_() {
   }
 }
 
-void NightmatiqMesh::update() {
+void SteinelMesh::update() {
+  if (!this->legacy_profile_) { this->node_poll_at_ = 0; return; }
   if (!this->mesh_ready_.load() || this->poll_stage_ != 0 ||
       this->access_operation_.load() != AccessOperation::NONE ||
       this->control_kind_ != ControlKind::NONE || this->control_request_pending_())
@@ -2021,7 +2159,20 @@ void NightmatiqMesh::update() {
   }
 }
 
-void NightmatiqMesh::request_refresh() {
+void SteinelMesh::request_refresh() {
+  this->node_poll_at_ = 0;
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    for (auto &state : this->node_states_) {
+      state.poll_at = 0; state.retry_at = 0; state.poll_step = 0; state.force_poll = true;
+      state.composition_at = 0;
+      state.value_poll_at.fill(0);
+      std::fill(std::begin(state.sensor_probes), std::end(state.sensor_probes), 0);
+      std::fill(std::begin(state.lux_probes), std::end(state.lux_probes), 0);
+      std::fill(std::begin(state.lc_probes), std::end(state.lc_probes), 0);
+    }
+  }
+  if (!this->legacy_profile_) return;
   if (!this->mesh_ready_.load()) {
     if (!this->configured_)
       this->set_status_("Configuration required");
@@ -2042,7 +2193,37 @@ void NightmatiqMesh::request_refresh() {
   this->poll_stage_at_ = millis();
 }
 
-void NightmatiqMesh::loop() {
+void SteinelMesh::update_radio_coexistence_() {
+  uint32_t status = 0;
+  if (this->mesh_started_) {
+    const bool transmitting = !this->mesh_ready_.load() ||
+        this->access_operation_.load() != AccessOperation::NONE ||
+        this->control_kind_ != ControlKind::NONE || this->node_completion_pending_.load();
+    status = transmitting ? ESP_COEX_BLE_ST_MESH_TRAFFIC : ESP_COEX_BLE_ST_MESH_STANDBY;
+  }
+  if (status == this->radio_coexistence_status_) return;
+  const uint32_t now = millis();
+  if (this->radio_coexistence_retry_at_ != 0 &&
+      static_cast<int32_t>(now - this->radio_coexistence_retry_at_) < 0) return;
+  esp_err_t error = ESP_OK;
+  if (this->radio_coexistence_status_ != 0)
+    error = esp_coex_status_bit_clear(ESP_COEX_ST_TYPE_BLE, this->radio_coexistence_status_);
+  if (error == ESP_OK) {
+    this->radio_coexistence_status_ = 0;
+    if (status != 0) error = esp_coex_status_bit_set(ESP_COEX_ST_TYPE_BLE, status);
+  }
+  if (error == ESP_OK) {
+    this->radio_coexistence_status_ = status;
+    this->radio_coexistence_retry_at_ = 0;
+  } else {
+    this->radio_coexistence_retry_at_ = now + 1000;
+    ESP_LOGW(TAG, "Could not update Mesh radio coexistence (0x%x)", static_cast<unsigned>(error));
+  }
+}
+
+void SteinelMesh::loop() {
+  this->update_radio_coexistence_();
+  this->expire_upload_();
   this->advance_factory_reset_();
   this->persist_pending_advertised_identity_();
   this->publish_pending_();
@@ -2095,7 +2276,11 @@ void NightmatiqMesh::loop() {
     this->request_refresh();
   }
   this->expire_access_operation_(now);
+  this->expire_diagnostic_groups_(now);
+  this->advance_nodes_(now);
+  this->update_radio_coexistence_();
   this->advance_address_recovery_(now);
+  if (!this->legacy_profile_) return;
   if (this->reboot_pending_.load())
     return;
   if (this->mode_override_pending_.load() &&
@@ -2105,9 +2290,7 @@ void NightmatiqMesh::loop() {
   }
   if (this->composition_query_in_flight_.load() &&
       static_cast<int32_t>(now - this->composition_query_deadline_.load()) >= 0) {
-    // Some ESP-IDF error completion events do not carry the request opcode and
-    // are therefore not attributable in config_callback(). Do not let such an
-    // event permanently suppress live identity reads.
+    // Error completions can omit the opcode; recover Config requests left pending.
     this->composition_query_in_flight_.store(false);
     this->mesh_timeouts_.fetch_add(1);
     this->composition_timeouts_.fetch_add(1);
@@ -2139,8 +2322,7 @@ void NightmatiqMesh::loop() {
       this->control_kind_ == ControlKind::NONE && !this->control_request_pending_())
     return;
 
-  // Give the authenticated Composition Data request first use of the Config
-  // Client so identity is available before the multi-stage state poll.
+  // Read authenticated composition before background state polling.
   const bool initial_identity_attempt_complete =
       !this->device_key_valid_ || this->composition_received_.load() ||
       (this->composition_query_attempts_.load() > 0 &&
@@ -2151,8 +2333,7 @@ void NightmatiqMesh::loop() {
   }
 
   if (this->control_kind_ != ControlKind::NONE || this->control_request_pending_()) {
-    // User control has priority over background reads. Finish at most the one
-    // already active access request, then run and verify the queued command.
+    // User commands follow the current in-flight request before background reads.
     this->poll_stage_ = 0;
     this->advance_control_(now);
     return;
@@ -2171,15 +2352,11 @@ void NightmatiqMesh::loop() {
         this->send_threshold_get_();
         break;
       case 3:
-        // Confirm the safety-relevant physical output before the LC mode.
-        // NightmatIQ often omits an LC Mode Status; putting that request first
-        // delayed HA output confirmation by a full timeout.
+        // Confirm output before LC mode, whose reply NightmatIQ can omit.
         if (this->send_onoff_get_() && this->output_confirmation_pending_)
           this->output_confirmation_attempts_++;
         break;
       case 4:
-        // Give a missed physical-output query its second chance immediately;
-        // do not place LC mode, Scene and Sensor timeouts in front of it.
         if (this->mesh_generic_rx_.load() == this->poll_generic_rx_start_ &&
             (!this->output_confirmation_pending_ ||
              this->output_confirmation_attempts_ < OUTPUT_CONFIRMATION_MAX_ATTEMPTS)) {
@@ -2190,14 +2367,11 @@ void NightmatiqMesh::loop() {
       case 5:
         if (this->output_confirmation_pending_) {
           if (this->mesh_generic_rx_.load() != this->poll_generic_rx_start_) {
-            // record_actual_output_ has already queued the fresh state for HA.
             this->output_confirmation_pending_ = false;
             this->output_confirmation_attempts_ = 0;
           } else if (this->output_confirmation_attempts_ <
                      OUTPUT_CONFIRMATION_MAX_ATTEMPTS) {
-            // Keep confirmation ahead of slower LC/Scene/Sensor reads. This
-            // avoids falling back to the normal 30-second poll after only two
-            // lost replies while preserving a real, non-optimistic HA state.
+            // Keep output confirmation ahead of slower reads and the normal 30 s poll.
             this->poll_stage_ = 3;
             this->poll_stage_at_ = now + 250;
             advance = false;
@@ -2213,9 +2387,7 @@ void NightmatiqMesh::loop() {
         this->send_scene_get_();
         break;
       case 7:
-        // The NightmatIQ occasionally misses one acknowledged request even at
-        // close range. Retry only when this complete poll cycle has not
-        // received any Sensor Status; never send more than two Sensor Gets.
+        // Retry Sensor Get once if this poll cycle received no Sensor Status.
         if (this->mesh_sensor_rx_.load() == this->poll_sensor_rx_start_)
           this->send_sensor_get_();
         break;
@@ -2227,21 +2399,19 @@ void NightmatiqMesh::loop() {
       if (this->poll_stage_ > 7)
         this->poll_stage_ = 0;
       else
-        // The global access-operation slot is released by the response or
-        // timeout callback. The short settle delay avoids needless idle time
-        // while still guaranteeing that no acknowledged messages overlap.
+        // Callback release and a short settle delay prevent overlapping acknowledged requests.
         this->poll_stage_at_ = now + 250;
     }
   }
 }
 
-void NightmatiqMesh::pause_ble_for_cloud_() {
+void SteinelMesh::pause_ble_for_cloud_() {
   if (this->mesh_mode_enabled_)
     return;
   this->cloud_api_shutdown_pending_.store(true);
 }
 
-void NightmatiqMesh::resume_ble_after_cloud_() {
+void SteinelMesh::resume_ble_after_cloud_() {
   if (!this->cloud_ble_resume_pending_.load() || this->mesh_mode_enabled_)
     return;
 
@@ -2250,10 +2420,9 @@ void NightmatiqMesh::resume_ble_after_cloud_() {
     return;
   }
 
-  // This standalone gateway has no Bluetooth Proxy role. Leave the setup
-  // scanner idle until the next explicit identity scan or Mesh-mode reboot.
+  // Leave the scanner idle: the standalone gateway has no Bluetooth Proxy role.
   this->cloud_ble_resume_pending_.store(false);
 }
 
-}  // namespace nightmatiq_mesh
+}  // namespace steinel_mesh
 }  // namespace esphome

@@ -4,17 +4,21 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib.sh
 source "$ROOT_DIR/scripts/lib.sh"
-CONFIG="$ROOT_DIR/esphome/nightmatiq-c3.yaml"
+CONFIG="$ROOT_DIR/esphome/steinel-c3.yaml"
 ESPHOME_BIN="$(find_esphome)"
-VERSION="$(sed -n 's/^[[:space:]]*project_version:[[:space:]]*"\([^"]*\)"/\1/p' "$CONFIG")"
+[[ $# -le 1 ]] || { echo 'Usage: 10_prepare_release.sh [version]' >&2; exit 1; }
+DEFAULT_VERSION="$(sed -n 's/^[[:space:]]*project_version:[[:space:]]*"\([^"]*\)"/\1/p' "$CONFIG")"
+VERSION="${1:-$DEFAULT_VERSION}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo "Invalid project version: ${VERSION:-missing}" >&2
   exit 1
 }
 
 cd "$ROOT_DIR/esphome"
-"$ESPHOME_BIN" clean nightmatiq-c3.yaml
-"$ESPHOME_BIN" compile nightmatiq-c3.yaml
+python3 "$ROOT_DIR/scripts/generate_steinel_page.py"
+bash "$ROOT_DIR/scripts/00_self_test.sh"
+env -u IDF_PATH -u IDF_TOOLS_PATH "$ESPHOME_BIN" -s project_version "$VERSION" clean steinel-c3.yaml
+env -u IDF_PATH -u IDF_TOOLS_PATH "$ESPHOME_BIN" -s project_version "$VERSION" compile steinel-c3.yaml
 
 FACTORY_SOURCE="$(find .esphome/build -type f -name firmware.factory.bin -print -quit)"
 OTA_SOURCE="$(find .esphome/build -type f -name firmware.ota.bin -print -quit)"
@@ -28,7 +32,7 @@ OTA_SOURCE="$(find .esphome/build -type f -name firmware.ota.bin -print -quit)"
 }
 
 RELEASE_DIR="$ROOT_DIR/output/v$VERSION"
-BASE_NAME="steinel-nightmatiq-esp32-c3-gateway-v$VERSION"
+BASE_NAME="steinel-mesh-esp32-c3-gateway-v$VERSION"
 mkdir -p "$RELEASE_DIR"
 cp "$FACTORY_SOURCE" "$RELEASE_DIR/$BASE_NAME-factory.bin"
 cp "$OTA_SOURCE" "$RELEASE_DIR/$BASE_NAME-ota.bin"

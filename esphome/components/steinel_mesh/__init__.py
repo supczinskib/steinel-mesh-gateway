@@ -12,10 +12,13 @@ from esphome.components import (
 from esphome.components.esphome import ota as esphome_ota
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 from esphome.const import CONF_ID
+from esphome.core import CORE
+from esphome.core.entity_helpers import register_device_class, register_unit_of_measurement
+from .native_api_devices import install_build_hook
 
 CODEOWNERS = []
 DEPENDENCIES = ["esp32", "web_server"]
-AUTO_LOAD = ["binary_sensor", "esp32_ble", "number", "select", "sensor", "text_sensor", "web_server_base"]
+AUTO_LOAD = ["binary_sensor", "esp32_ble", "number", "select", "sensor", "switch", "text_sensor", "web_server_base"]
 
 CONF_LUX_SENSOR_ID = "lux_sensor_id"
 CONF_RSSI_SENSOR_ID = "rssi_sensor_id"
@@ -34,15 +37,15 @@ CONF_WEB_USERNAME = "web_username"
 CONF_WEB_PASSWORD = "web_password"
 CONF_OTA_ID = "ota_id"
 
-nightmatiq_ns = cg.esphome_ns.namespace("nightmatiq_mesh")
-NightmatiqMesh = nightmatiq_ns.class_(
-    "NightmatiqMesh", cg.PollingComponent
+steinel_ns = cg.esphome_ns.namespace("steinel_mesh")
+SteinelMesh = steinel_ns.class_(
+    "SteinelMesh", cg.PollingComponent
 )
 
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(NightmatiqMesh),
+        cv.GenerateID(): cv.declare_id(SteinelMesh),
         cv.GenerateID(esp32_ble.CONF_BLE_ID): cv.use_id(esp32_ble.ESP32BLE),
         cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(web_server_base.WebServerBase),
         cv.Required(CONF_OTA_ID): cv.use_id(esphome_ota.ESPHomeOTAComponent),
@@ -66,8 +69,20 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
+    # Reserve native API entity capacity before discovery.
+    cg.add_define("USE_DEVICES")
+    cg.add_define("ESPHOME_DEVICE_COUNT", 16)
+    install_build_hook()
+    for platform, count in {"number": 48, "sensor": 16, "binary_sensor": 48,
+                            "text_sensor": 112, "select": 32}.items():
+        CORE.platform_counts[platform] += count
+    cg.add_define("STEINEL_LUX_FIELDS", register_device_class("illuminance") |
+                  (register_unit_of_measurement("lx") << 8))
+    cg.add_define("STEINEL_PERCENT_FIELDS", register_unit_of_measurement("%") << 8)
+    cg.add_define("STEINEL_SECONDS_FIELDS", register_unit_of_measurement("s") << 8)
+    cg.add_define("STEINEL_MOTION_FIELDS", register_device_class("motion"))
     if config[CONF_EXTENDED_DIAGNOSTICS]:
-        cg.add_define("USE_NIGHTMATIQ_EXTENDED_DIAGNOSTICS")
+        cg.add_define("USE_STEINEL_EXTENDED_DIAGNOSTICS")
 
     base = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
     ota = await cg.get_variable(config[CONF_OTA_ID])

@@ -10,6 +10,6 @@ PORT="$1"
 ESPHOME_BIN="$(find_esphome)"
 
 cd "$ROOT_DIR/esphome"
-"$ESPHOME_BIN" clean nightmatiq-c3.yaml
-"$ESPHOME_BIN" compile nightmatiq-c3.yaml
-"$ESPHOME_BIN" upload nightmatiq-c3.yaml --device "$PORT"
+"$ESPHOME_BIN" clean steinel-c3.yaml
+"$ESPHOME_BIN" compile steinel-c3.yaml
+"$ESPHOME_BIN" upload steinel-c3.yaml --device "$PORT"

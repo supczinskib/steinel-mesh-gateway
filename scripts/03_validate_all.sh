@@ -9,5 +9,5 @@ source "$ROOT_DIR/scripts/lib.sh"
 ESPHOME_BIN="$(find_esphome)"
 
 cd "$ROOT_DIR/esphome"
-"$ESPHOME_BIN" config nightmatiq-c3.yaml
-echo 'NightmatIQ ESPHome configuration passed validation.'
+"$ESPHOME_BIN" config steinel-c3.yaml
+echo 'Steinel Mesh ESPHome configuration passed validation.'

@@ -13,6 +13,7 @@
 #include "esphome/components/number/number.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/core/component.h"
@@ -25,13 +26,14 @@
 #include "esp_ble_mesh_sensor_model_api.h"
 #include "esp_ble_mesh_time_scene_model_api.h"
 #include "esp_http_client.h"
+#include "mesh_protocol.h"
 
 namespace esphome {
-namespace nightmatiq_mesh {
+namespace steinel_mesh {
 
-class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
+class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
  public:
-  NightmatiqMesh(web_server_base::WebServerBase *base, ESPHomeOTAComponent *ota)
+  SteinelMesh(web_server_base::WebServerBase *base, ESPHomeOTAComponent *ota)
       : base_(base), ota_(ota) {}
 
   void set_lux_sensor(sensor::Sensor *value) { this->lux_sensor_ = value; }
@@ -72,6 +74,10 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   bool isRequestHandlerTrivial() const override { return false; }
+  void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len,
+                  size_t index, size_t total) override;
+  enum class NodeCommand : uint8_t { ONOFF, BRIGHTNESS, AUTO, THRESHOLD, RUN_TIME, MODE };
+  bool queue_node_command(uint16_t address, NodeCommand command, uint32_t value);
 
   void set_threshold(float lux);
   void set_mode(const std::string &mode);
@@ -121,14 +127,12 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   static constexpr uint16_t NIGHTMATIQ_PRODUCT_ID = 0x1DCE;
   static constexpr uint16_t FLAG_ENABLED = 0x0001;
   static constexpr uint16_t FLAG_REMOVE_PENDING = 0x0002;
-  // Set only after a Secure Network Beacon changes the IV Index or an
-  // authenticated Access response proves that the stored value is usable.
+  // IV Index confirmed by an authenticated beacon update or Access reply.
   static constexpr uint16_t FLAG_IV_INDEX_CONFIRMED = 0x0004;
+  static constexpr uint16_t FLAG_DEVICE_CATALOG = 0x0008;
   static constexpr size_t MAX_DISCOVERY_RESPONSE_BYTES = 32 * 1024;
   static constexpr uint32_t ACTUAL_OUTPUT_STALE_MS = 5UL * 60UL * 1000UL;
-  // A mode SET is intentionally unacknowledged for immediate lamp control.
-  // Confirm its physical result several times before returning to the normal
-  // Retry within the 30-second polling interval after an unanswered GET.
+  // Confirm mode SET results and retry unanswered GETs within the polling interval.
   static constexpr uint8_t OUTPUT_CONFIRMATION_MAX_ATTEMPTS = 5;
 
   struct StoredConfig {
@@ -170,8 +174,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
     uint16_t initial_address{0};
     uint16_t current_address{0};
     uint16_t automatic_rotations{0};
-    // Retained to preserve the version-1 NVS record layout. Manual rotation
-    // is no longer exposed by the standalone gateway.
+    // Preserve the version-1 NVS record layout.
     uint16_t reserved{0};
     uint32_t installation_nonce{0};
     std::array<uint8_t, 16> mesh_uuid{};
@@ -232,6 +235,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
 
   enum class AccessOperation : uint8_t {
     NONE,
+    NODE,
     SENSOR_GET,
     REVISION_CATALOG_GET,
     THRESHOLD_GET,
@@ -257,10 +261,142 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   struct CloudBody;
   struct CloudTaskArgs;
   struct AutoUpdateContext;
+  struct NodeEntities;
+  struct NodeState {
+    uint32_t last_seen{0};
+    // Per-value freshness: a live switch must not keep an old sensor value alive.
+    std::array<uint32_t, 7> value_seen{};
+    protocol::SensorReadings sensors{};
+    uint32_t stale_after{180000};
+    uint32_t lux{protocol::UNKNOWN_24};
+    uint32_t threshold{protocol::UNKNOWN_24};
+    uint32_t run_time{protocol::UNKNOWN_24};
+    uint16_t brightness{0};
+    bool brightness_known{false};
+    bool lux_property{false};
+    int8_t on{-1}, automatic{-1}, motion{-1};
+    protocol::ConfirmedMode mode{};
+    protocol::PendingControls controls{};
+    uint8_t verify_fields{0}, verify_next{0};
+    std::array<uint8_t, 5> verify_attempts{};
+    uint16_t company{0}, product{0}, composition_version{0};
+    uint16_t supported{0};
+    char firmware[17]{}, hardware[17]{};
+    uint8_t sensor_probes[protocol::MAX_ELEMENTS]{};
+    uint8_t lux_probes[protocol::MAX_ELEMENTS]{};
+    uint8_t lc_probes[2]{};
+    std::array<uint32_t, protocol::MAX_ELEMENTS> sensor_push_at{};
+    std::array<uint32_t, 7> value_poll_at{};
+    uint8_t lux_element{0xFF}, motion_element{0xFF};
+    uint32_t poll_at{0};
+    uint8_t poll_step{0};
+    bool discovery_complete{false}, force_poll{false}, metadata_sent{false};
+    bool composition_checked{false}, composition_matches{false};
+    uint32_t composition_at{0};
+    bool dirty{false};
+    uint8_t failures{0};
+    bool was_available{false};
+    uint32_t retry_at{0};
+    NodeEntities *entities{nullptr};
+  };
+  struct NodeRequest {
+    uint8_t node{0}, element{0}, kind{0}, attempts{0}, tid{0};
+    uint32_t value{0};
+    uint8_t step{0};
+    bool diagnostic{false};
+    bool verification{false};
+  };
+  struct StoredFunctions {
+    uint32_t magic{0x534D4631};
+    std::array<uint8_t, 16> mesh_uuid{};
+    struct Entry { uint32_t identity{0}; uint16_t product{0}, functions{0}; };
+    std::array<Entry, protocol::MAX_NODES> entries{};
+  };
+  static constexpr uint8_t NODE_QUEUE_SIZE = 16;
+  ESPPreferenceObject catalog_preference_;
+  ESPPreferenceObject import_guard_preference_;
+  ESPPreferenceObject functions_preference_;
+  StoredFunctions stored_functions_{};
+  protocol::Catalog catalog_{};
+  bool catalog_valid_{false};
+  bool legacy_profile_{true};
+  std::array<NodeState, protocol::MAX_NODES> node_states_{};
+  std::array<NodeRequest, NODE_QUEUE_SIZE> node_queue_{};
+  std::mutex node_mutex_;
+  uint8_t node_queue_count_{0};
+  NodeRequest active_node_request_{};
+  std::atomic<uint16_t> node_destination_{0};
+  std::atomic<uint32_t> node_expected_status_{0};
+  std::atomic<uint16_t> node_expected_property_{0};
+  std::atomic<bool> node_completion_pending_{false};
+  std::atomic<bool> node_completion_success_{false};
+  uint32_t node_next_request_at_{0};
+  uint32_t node_poll_at_{0};
+  uint8_t node_poll_index_{0}, node_poll_step_{0};
+  uint8_t node_priority_burst_{0};
+  uint8_t node_write_burst_{0};
+  protocol::DeviceDiagnostics device_diagnostics_{};
+  protocol::StateTrace state_trace_{};
+  uint32_t diagnostic_session_id_{0};
+  std::array<uint16_t, protocol::MAX_ELEMENTS> diagnostic_groups_{};
+  uint8_t diagnostic_group_count_{0};
+  bool prepare_diagnostic_groups_(const protocol::Node &node);
+  bool clear_diagnostic_groups_();
+  void expire_diagnostic_groups_(uint32_t now);
+  bool next_diagnostic_request_(uint32_t now, NodeRequest &request);
+  bool diagnostic_request_allowed_(const NodeRequest &request);
+  void record_diagnostic_(uint16_t source, protocol::DeviceDiagnostics::Event event, uint32_t opcode,
+                          uint16_t property = 0, const uint8_t *data = nullptr, size_t length = 0,
+                          int32_t error = 0);
+  bool diagnostic_reply_(const esp_ble_mesh_client_common_param_t *params, uint32_t received,
+                         bool valid, uint16_t property = 0);
+  bool restore_diagnostic_node_(size_t index);
+  void handle_diagnostics_(AsyncWebServerRequest *request);
+  void handle_state_trace_(AsyncWebServerRequest *request);
+  void handle_diagnostic_session_(AsyncWebServerRequest *request);
+  void poll_nodes_(uint32_t now);
+  bool node_response_value_matches_(const esp_ble_mesh_client_common_param_t *params,
+                                    uint32_t received, uint32_t value) const;
+  std::array<uint8_t, 3> node_property_storage_{};
+  net_buf_simple node_property_buffer_{};
+  CloudBody *upload_body_{nullptr};
+  std::string upload_error_;
+  bool upload_receiving_{false};
+  uint32_t upload_last_chunk_at_{0};
+  void *upload_request_{nullptr};
+  void expire_upload_();
+  bool load_catalog_();
+  bool save_catalog_(const protocol::Catalog &catalog);
+  bool sync_node_functions_();
+  bool restore_catalog_();
+  void setup_node_entities_();
+  void advance_nodes_(uint32_t now);
+  bool send_node_request_(const NodeRequest &request);
+  void finish_node_request_(bool success);
+  bool node_event_(const esp_ble_mesh_client_common_param_t *params, uint32_t received,
+                   bool success, uint16_t property = 0);
+  bool node_generic_event_(esp_ble_mesh_generic_client_cb_event_t event,
+                           esp_ble_mesh_generic_client_cb_param_t *param);
+  bool node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
+                         esp_ble_mesh_light_client_cb_param_t *param);
+  bool node_sensor_event_(esp_ble_mesh_sensor_client_cb_event_t event,
+                          esp_ble_mesh_sensor_client_cb_param_t *param);
+  bool node_composition_event_(esp_ble_mesh_cfg_client_cb_event_t event,
+                               esp_ble_mesh_cfg_client_cb_param_t *param);
+  bool node_scene_event_(esp_ble_mesh_time_scene_client_cb_event_t event,
+                        esp_ble_mesh_time_scene_client_cb_param_t *param);
+  void handle_nodes_(AsyncWebServerRequest *request);
+  void handle_selection_(AsyncWebServerRequest *request);
+  void handle_node_control_(AsyncWebServerRequest *request);
+  void handle_local_import_(AsyncWebServerRequest *request);
+  static void local_import_task_(void *parameter);
+  bool install_backup_(CloudBody &body, uint32_t iv_index, uint16_t address, std::string &error);
+  static esp_ble_mesh_model_t *node_model_(uint8_t kind);
 
   bool initialize_bluetooth_();
   bool initialize_mesh_();
   bool deinitialize_mesh_(bool erase_flash);
+  void update_radio_coexistence_();
   bool restore_target_node_();
   void advance_mesh_start_();
   void begin_identity_scan_();
@@ -309,7 +445,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   bool parse_backup_(const CloudBody &body, uint32_t requested_iv_index,
                      uint16_t requested_node_address, StoredConfig &config,
                      std::array<uint8_t, 16> &device_key,
-                     StoredAddressPolicy &address_policy, std::string &error);
+                     StoredAddressPolicy &address_policy, protocol::Catalog &catalog, std::string &error);
   bool cloud_get_(const std::string &path, const std::string &email, const std::string &password,
                   bool use_ota_workspace, CloudBody &body, int &http_status, std::string &error);
   bool discover_networks_(const std::string &email, const std::string &password, std::string &error);
@@ -382,7 +518,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   bool send_scene_recall_();
   uint8_t next_tid_();
 
-  static NightmatiqMesh *instance_;
+  static SteinelMesh *instance_;
 
   web_server_base::WebServerBase *base_;
   ESPHomeOTAComponent *ota_;
@@ -407,6 +543,8 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   bool configured_{false};
   bool mesh_mode_enabled_{false};
   bool mesh_started_{false};
+  uint32_t radio_coexistence_status_{0};
+  uint32_t radio_coexistence_retry_at_{0};
   bool mesh_start_pending_{false};
   std::atomic<bool> mesh_remove_pending_{false};
   uint32_t mesh_remove_not_before_{0};
@@ -416,6 +554,9 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   uint32_t mesh_start_deadline_{0};
   std::atomic<bool> identity_scan_pending_{false};
   std::atomic<bool> identity_found_this_boot_{false};
+  uint16_t identity_node_address_{0};
+  std::array<uint8_t, 6> identity_advertiser_{};
+  bool identity_advertiser_seen_{false}, identity_advertiser_conflict_{false};
   bool identity_scan_started_{false};
   enum class IdentityScanPhase : uint8_t {
     WAIT_FOR_BLE,
@@ -437,7 +578,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   uint32_t iv_index_check_at_{0};
   bool keys_bound_pending_{false};
   uint32_t keys_bound_at_{0};
-  uint8_t tid_{0};
+  std::atomic<uint8_t> tid_{0};
 
   sensor::Sensor *lux_sensor_{nullptr};
   sensor::Sensor *rssi_sensor_{nullptr};
@@ -580,9 +721,7 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   uint32_t control_previous_threshold_centilux_{0};
   std::atomic<uint32_t> mode_confirmation_deadline_{0};
 
-  // ESP-IDF deep-copies the Light LC SET structure but not the property-value
-  // bytes referenced by it. Keep both objects alive until the acknowledged
-  // transaction completes; a stack buffer here corrupts the written lux value.
+  // ESP-IDF does not copy LC property bytes; retain them until completion.
   std::array<uint8_t, 3> threshold_set_storage_{};
   net_buf_simple threshold_set_buffer_{};
 
@@ -595,5 +734,5 @@ class NightmatiqMesh final : public PollingComponent, public AsyncWebHandler {
   bool initial_poll_started_{false};
 };
 
-}  // namespace nightmatiq_mesh
+}  // namespace steinel_mesh
 }  // namespace esphome

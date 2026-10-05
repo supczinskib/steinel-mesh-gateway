@@ -1,0 +1,133 @@
+{
+  "status": {
+    "configured": true,
+    "enabled": true,
+    "mesh_ready": true,
+    "busy": false,
+    "message": "Mesh client ready; polling selected devices",
+    "gateway_version": "2.0.0",
+    "runtime_mode": "Bluetooth Mesh",
+    "network": "Home",
+    "local_address": "146C",
+    "iv_index": 5,
+    "iv_index_confirmed": true,
+    "networks": [],
+    "connected_ssid": "Home Garden",
+    "factory_password": false,
+    "extended_diagnostics": true,
+    "gateway_uptime_seconds": 9418,
+    "gateway_reset_reason": "Power-on reset",
+    "free_internal_heap": 107448,
+    "largest_internal_block": 94208,
+    "mesh_tx_accepted": 1827,
+    "mesh_tx_attempts": 1827,
+    "mesh_tx_errors": 0,
+    "mesh_last_tx_error": 0,
+    "mesh_rx_messages": 1229,
+    "mesh_timeouts": 58,
+    "mesh_rssi_received": true,
+    "mesh_last_rssi_dbm": -53,
+    "mesh_last_rssi_age_seconds": 22
+  },
+  "nodes": [
+    {
+      "address": 2, "name": "IS Digi NM 2E6915", "model": "NightmatIQ Plus",
+      "company": 1379, "product": 7630, "uuid": "",
+      "firmware": "1.1.0", "hardware": "1", "composition_vid": 0,
+      "capabilities": 29, "functions": 169, "elements": 3,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 0, "automatic": 1, "mode": 0, "motion": -1,
+      "lux": 15000, "threshold": 500, "run_time": -1, "brightness": -1,
+      "stale_after_ms": 180000,
+      "sensors": [{"element": 2, "address": 4, "property": 78, "length": 3, "raw": "983A00", "age_seconds": 22, "available": true, "truncated": false}]
+    },
+    {
+      "address": 60, "name": "L 830 SC", "model": "L 830 SC",
+      "company": 1379, "product": 6939, "uuid": "",
+      "firmware": "17.2.3", "hardware": "", "composition_vid": 34947,
+      "capabilities": 63, "functions": 127, "elements": 4,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 0,
+      "lux": 1830, "threshold": 2000, "run_time": 120000, "brightness": 49151,
+      "stale_after_ms": 180000,
+      "sensors": [
+        {"element": 2, "address": 62, "property": 66, "length": 1, "raw": "00", "age_seconds": 3, "available": true, "truncated": false},
+        {"element": 3, "address": 63, "property": 78, "length": 3, "raw": "260700", "age_seconds": 2, "available": true, "truncated": false}
+      ]
+    },
+    {
+      "address": 70, "name": "L 820 SC", "model": "L 820 SC",
+      "company": 1379, "product": 7796, "uuid": "",
+      "firmware": "17.1.1", "hardware": "", "composition_vid": 34881,
+      "capabilities": 63, "functions": 127, "elements": 4,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 1,
+      "lux": 2450, "threshold": 3000, "run_time": 90000, "brightness": 39321,
+      "stale_after_ms": 180000,
+      "sensors": [
+        {"element": 2, "address": 72, "property": 66, "length": 1, "raw": "C8", "age_seconds": 1, "available": true, "truncated": false},
+        {"element": 3, "address": 73, "property": 78, "length": 3, "raw": "920900", "age_seconds": 2, "available": true, "truncated": false}
+      ]
+    },
+    {
+      "address": 80, "name": "L 42 SC", "model": "L 42 SC",
+      "company": 1379, "product": 7975, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 31, "functions": 127, "elements": 3,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 0,
+      "lux": 1260, "threshold": 1500, "run_time": 60000, "brightness": 65535,
+      "stale_after_ms": 180000, "sensors": []
+    },
+    {
+      "address": 10, "name": "IS 180", "model": "IS 180",
+      "company": 1379, "product": 7648, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 13, "functions": 125, "elements": 3,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 1,
+      "lux": 2500, "threshold": 3000, "run_time": 60000, "brightness": -1,
+      "stale_after_ms": 180000, "sensors": []
+    },
+    {
+      "address": 20, "name": "L 810 SC", "model": "L 810 SC",
+      "company": 1379, "product": 7801, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 15, "functions": 127, "elements": 3,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 0,
+      "lux": 1830, "threshold": 2000, "run_time": 120000, "brightness": 49151,
+      "stale_after_ms": 180000, "sensors": []
+    },
+    {
+      "address": 30, "name": "L 810 C", "model": "L 810 C",
+      "company": 1379, "product": 7869, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 3, "functions": 3, "elements": 1,
+      "selected": true, "available": true, "verified": true, "controls_allowed": true,
+      "output": 1, "automatic": -1, "mode": -1, "motion": -1,
+      "lux": 16777215, "threshold": 16777215, "run_time": 16777215, "brightness": 32768,
+      "stale_after_ms": 180000, "sensors": []
+    },
+    {
+      "address": 40, "name": "GL 80 SC", "model": "",
+      "company": 1379, "product": 0, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 15, "functions": 127, "elements": 3,
+      "selected": true, "available": true, "verified": false, "controls_allowed": true,
+      "output": 0, "automatic": 1, "mode": -1, "motion": 0,
+      "lux": 22000, "threshold": 1000, "run_time": 90000, "brightness": 0,
+      "stale_after_ms": 180000, "sensors": []
+    },
+    {
+      "address": 50, "name": "XLED home 2 SC", "model": "",
+      "company": 1379, "product": 0, "uuid": "",
+      "firmware": "", "hardware": "", "composition_vid": 0,
+      "capabilities": 13, "functions": 125, "elements": 3,
+      "selected": true, "available": true, "verified": false, "controls_allowed": true,
+      "output": 1, "automatic": 1, "mode": -1, "motion": 1,
+      "lux": 450, "threshold": 1500, "run_time": 180000, "brightness": -1,
+      "stale_after_ms": 180000, "sensors": []
+    }
+  ]
+}

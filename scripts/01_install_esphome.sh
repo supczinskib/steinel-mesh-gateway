@@ -16,7 +16,7 @@ if not ((3, 12) <= sys.version_info[:2] < (3, 15)):
 print("Python OK:", sys.version.split()[0])
 PY
 
-VENV=/opt/esphome-nightmatiq
+VENV=/opt/esphome-steinel
 python3 -m venv --clear "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip wheel
 "$VENV/bin/python" -m pip install --upgrade "esphome==2026.7.3"

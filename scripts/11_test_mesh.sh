@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEST_DIR="$(mktemp -d -t steinel-mesh-tests)"
+trap 'rm -f "$TEST_DIR/protocol"; rmdir "$TEST_DIR"' EXIT
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -I "$ROOT_DIR/esphome/components/steinel_mesh" \
+  "$ROOT_DIR/tests/test_mesh_protocol.cpp" -o "$TEST_DIR/protocol"
+"$TEST_DIR/protocol"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_backup_parser.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_backup_import.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_queue.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_events.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_transport.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_callbacks.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_polling.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_partial_polling.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_missing_replies.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_expired_recovery.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_identity_refresh.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_slow_network.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_state_expiry.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_device_diagnostics.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_diagnostic_load.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_ha_panel.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_recovery_identity.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_radio_coexistence.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_native_api_devices.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_mesh_disabled_devices.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_mesh_workflows.py"

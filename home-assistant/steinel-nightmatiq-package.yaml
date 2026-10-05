@@ -3,32 +3,150 @@ template:
       - name: "Stan sensora"
         default_entity_id: sensor.steinel_nightmatiq_stan_sensora
         unique_id: steinel_nightmatiq_sensor_summary
-        icon: >-
-          {{ 'mdi:lightbulb' if
-             is_state('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output', 'on')
-             else 'mdi:lightbulb-outline' }}
-        availability: >-
-          {{ states('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output')
-             not in ['unknown', 'unavailable'] }}
+        attributes: &nightmatiq_target
+          target_entities: >-
+            {% set ns = namespace(target=this.attributes.get('target_entities', {}), candidates=[]) %}
+            {% if not ns.target %}
+              {% for mode in states.select | sort(attribute='entity_id') %}
+                {% if mode.attributes.get('options', []) == ['Auto', 'Always On', 'Always Off'] and device_attr(device_id(mode.entity_id), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                  {% for entity in device_entities(device_id(mode.entity_id)) %}
+                    {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                      {% set ns.candidates = ns.candidates + [{'mode': mode.entity_id, 'output': entity}] %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+              {% endfor %}
+              {% if ns.candidates | count == 1 %}
+                {% set ns.target = ns.candidates[0] %}
+              {% elif ns.candidates | count == 0 and states('select.steinel_nightmatiq_plus_nightmatiq_mode') in ['Auto', 'Always On', 'Always Off'] and device_attr(device_id('select.steinel_nightmatiq_plus_nightmatiq_mode'), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                {% set ns.target = {'mode': 'select.steinel_nightmatiq_plus_nightmatiq_mode', 'output': 'binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output'} %}
+              {% endif %}
+            {% endif %}
+            {% set output = namespace(entity=ns.target.get('output', '')) %}
+            {% for entity in device_entities(device_id(ns.target.get('mode', ''))) %}
+              {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                {% set output.entity = entity %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.target %}
+              {% set ns.target = dict(ns.target, output=output.entity) %}
+            {% endif %}
+            {{ ns.target }}
+        icon: &nightmatiq_icon >-
+          {% set ns = namespace(target=this.attributes.get('target_entities', {}), candidates=[]) %}
+          {% if not ns.target %}
+            {% for mode in states.select | sort(attribute='entity_id') %}
+              {% if mode.attributes.get('options', []) == ['Auto', 'Always On', 'Always Off'] and device_attr(device_id(mode.entity_id), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                {% for entity in device_entities(device_id(mode.entity_id)) %}
+                  {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                    {% set ns.candidates = ns.candidates + [{'mode': mode.entity_id, 'output': entity}] %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.candidates | count == 1 %}
+              {% set ns.target = ns.candidates[0] %}
+            {% elif ns.candidates | count == 0 and states('select.steinel_nightmatiq_plus_nightmatiq_mode') in ['Auto', 'Always On', 'Always Off'] and device_attr(device_id('select.steinel_nightmatiq_plus_nightmatiq_mode'), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+              {% set ns.target = {'mode': 'select.steinel_nightmatiq_plus_nightmatiq_mode', 'output': 'binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output'} %}
+            {% endif %}
+          {% endif %}
+          {% set output = namespace(entity=ns.target.get('output', '')) %}
+          {% for entity in device_entities(device_id(ns.target.get('mode', ''))) %}
+            {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+              {% set output.entity = entity %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.target %}
+            {% set ns.target = dict(ns.target, output=output.entity) %}
+          {% endif %}
+          {{ 'mdi:lightbulb' if is_state(ns.target.get('output', ''), 'on') else 'mdi:lightbulb-outline' }}
+        availability: &nightmatiq_available >-
+          {% set ns = namespace(target=this.attributes.get('target_entities', {}), candidates=[]) %}
+          {% if not ns.target %}
+            {% for mode in states.select | sort(attribute='entity_id') %}
+              {% if mode.attributes.get('options', []) == ['Auto', 'Always On', 'Always Off'] and device_attr(device_id(mode.entity_id), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                {% for entity in device_entities(device_id(mode.entity_id)) %}
+                  {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                    {% set ns.candidates = ns.candidates + [{'mode': mode.entity_id, 'output': entity}] %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.candidates | count == 1 %}
+              {% set ns.target = ns.candidates[0] %}
+            {% elif ns.candidates | count == 0 and states('select.steinel_nightmatiq_plus_nightmatiq_mode') in ['Auto', 'Always On', 'Always Off'] and device_attr(device_id('select.steinel_nightmatiq_plus_nightmatiq_mode'), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+              {% set ns.target = {'mode': 'select.steinel_nightmatiq_plus_nightmatiq_mode', 'output': 'binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output'} %}
+            {% endif %}
+          {% endif %}
+          {% set output = namespace(entity=ns.target.get('output', '')) %}
+          {% for entity in device_entities(device_id(ns.target.get('mode', ''))) %}
+            {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+              {% set output.entity = entity %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.target %}
+            {% set ns.target = dict(ns.target, output=output.entity) %}
+          {% endif %}
+          {{ ns.target | count > 0 and states(ns.target.get('mode', '')) in ['Auto', 'Always On', 'Always Off'] and states(ns.target.get('output', '')) not in ['unknown', 'unavailable'] }}
         state: >-
-          {{ 'włączony' if
-             is_state('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output', 'on')
-             else 'wyłączony' }}{{ ' · Auto' if
-             is_state('select.steinel_nightmatiq_plus_nightmatiq_mode', 'Auto')
-             else '' }}
+          {% set ns = namespace(target=this.attributes.get('target_entities', {}), candidates=[]) %}
+          {% if not ns.target %}
+            {% for mode in states.select | sort(attribute='entity_id') %}
+              {% if mode.attributes.get('options', []) == ['Auto', 'Always On', 'Always Off'] and device_attr(device_id(mode.entity_id), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                {% for entity in device_entities(device_id(mode.entity_id)) %}
+                  {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                    {% set ns.candidates = ns.candidates + [{'mode': mode.entity_id, 'output': entity}] %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.candidates | count == 1 %}
+              {% set ns.target = ns.candidates[0] %}
+            {% elif ns.candidates | count == 0 and states('select.steinel_nightmatiq_plus_nightmatiq_mode') in ['Auto', 'Always On', 'Always Off'] and device_attr(device_id('select.steinel_nightmatiq_plus_nightmatiq_mode'), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+              {% set ns.target = {'mode': 'select.steinel_nightmatiq_plus_nightmatiq_mode', 'output': 'binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output'} %}
+            {% endif %}
+          {% endif %}
+          {% set output = namespace(entity=ns.target.get('output', '')) %}
+          {% for entity in device_entities(device_id(ns.target.get('mode', ''))) %}
+            {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+              {% set output.entity = entity %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.target %}
+            {% set ns.target = dict(ns.target, output=output.entity) %}
+          {% endif %}
+          {{ 'włączony' if is_state(ns.target.get('output', ''), 'on') else 'wyłączony' }}{{ ' · Auto' if is_state(ns.target.get('mode', ''), 'Auto') else '' }}
       - name: "Sensor state"
         default_entity_id: sensor.steinel_nightmatiq_sensor_state
         unique_id: steinel_nightmatiq_sensor_summary_en
-        icon: >-
-          {{ 'mdi:lightbulb' if
-             is_state('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output', 'on')
-             else 'mdi:lightbulb-outline' }}
-        availability: >-
-          {{ states('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output')
-             not in ['unknown', 'unavailable'] }}
+        attributes: *nightmatiq_target
+        icon: *nightmatiq_icon
+        availability: *nightmatiq_available
         state: >-
-          {{ 'on' if
-             is_state('binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output', 'on')
-             else 'off' }}{{ ' · Auto' if
-             is_state('select.steinel_nightmatiq_plus_nightmatiq_mode', 'Auto')
-             else '' }}
+          {% set ns = namespace(target=this.attributes.get('target_entities', {}), candidates=[]) %}
+          {% if not ns.target %}
+            {% for mode in states.select | sort(attribute='entity_id') %}
+              {% if mode.attributes.get('options', []) == ['Auto', 'Always On', 'Always Off'] and device_attr(device_id(mode.entity_id), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+                {% for entity in device_entities(device_id(mode.entity_id)) %}
+                  {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+                    {% set ns.candidates = ns.candidates + [{'mode': mode.entity_id, 'output': entity}] %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.candidates | count == 1 %}
+              {% set ns.target = ns.candidates[0] %}
+            {% elif ns.candidates | count == 0 and states('select.steinel_nightmatiq_plus_nightmatiq_mode') in ['Auto', 'Always On', 'Always Off'] and device_attr(device_id('select.steinel_nightmatiq_plus_nightmatiq_mode'), 'model') in [none, '', 'steinel_mesh_gateway', 'steinel_nightmatiq_gateway', 'NightmatIQ Plus'] %}
+              {% set ns.target = {'mode': 'select.steinel_nightmatiq_plus_nightmatiq_mode', 'output': 'binary_sensor.steinel_nightmatiq_plus_nightmatiq_actual_light_output'} %}
+            {% endif %}
+          {% endif %}
+          {% set output = namespace(entity=ns.target.get('output', '')) %}
+          {% for entity in device_entities(device_id(ns.target.get('mode', ''))) %}
+            {% if entity.startswith('binary_sensor.') and (entity.endswith('_output') or (state_attr(entity, 'friendly_name') or '').endswith('Output')) %}
+              {% set output.entity = entity %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.target %}
+            {% set ns.target = dict(ns.target, output=output.entity) %}
+          {% endif %}
+          {{ 'on' if is_state(ns.target.get('output', ''), 'on') else 'off' }}{{ ' · Auto' if is_state(ns.target.get('mode', ''), 'Auto') else '' }}
