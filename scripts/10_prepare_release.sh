@@ -9,7 +9,7 @@ ESPHOME_BIN="$(find_esphome)"
 [[ $# -le 1 ]] || { echo 'Usage: 10_prepare_release.sh [version]' >&2; exit 1; }
 DEFAULT_VERSION="$(sed -n 's/^[[:space:]]*project_version:[[:space:]]*"\([^"]*\)"/\1/p' "$CONFIG")"
 VERSION="${1:-$DEFAULT_VERSION}"
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+[[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ && ${#VERSION} -le 23 ]] || {
   echo "Invalid project version: ${VERSION:-missing}" >&2
   exit 1
 }
@@ -17,8 +17,8 @@ VERSION="${1:-$DEFAULT_VERSION}"
 cd "$ROOT_DIR/esphome"
 python3 "$ROOT_DIR/scripts/generate_steinel_page.py"
 bash "$ROOT_DIR/scripts/00_self_test.sh"
-env -u IDF_PATH -u IDF_TOOLS_PATH "$ESPHOME_BIN" -s project_version "$VERSION" clean steinel-c3.yaml
-env -u IDF_PATH -u IDF_TOOLS_PATH "$ESPHOME_BIN" -s project_version "$VERSION" compile steinel-c3.yaml
+env -u IDF_PATH -u IDF_TOOLS_PATH -u IDF_PYTHON_ENV_PATH "$ESPHOME_BIN" -s project_version "$VERSION" clean steinel-c3.yaml
+env -u IDF_PATH -u IDF_TOOLS_PATH -u IDF_PYTHON_ENV_PATH "$ESPHOME_BIN" -s project_version "$VERSION" compile steinel-c3.yaml
 
 FACTORY_SOURCE="$(find .esphome/build -type f -name firmware.factory.bin -print -quit)"
 OTA_SOURCE="$(find .esphome/build -type f -name firmware.ota.bin -print -quit)"

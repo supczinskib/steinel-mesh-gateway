@@ -8,7 +8,7 @@
 Appareils Steinel <-> Bluetooth Mesh <-> Passerelle ESP32-C3 -> Home Assistant
 ```
 
-Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.0** prend en charge plusieurs appareils d’un même réseau.
+Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.1** prend en charge plusieurs appareils d’un même réseau.
 
 Auteur et responsable : **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -129,7 +129,7 @@ La compatibilité dépend des modèles réels et du micrologiciel, pas uniquemen
 
 Chaque entrée exige une sauvegarde valide du réseau Connect, Company ID `0x0563`, des modèles pris en charge associés à l’AppKey importée et le respect des limites ci-dessous. Les anciennes versions Bluetooth propriétaires, variantes non connectées, produits uniquement Z-Wave/KNX/DALI et boutons uniquement clients ne sont pas inclus. La conversion Mesh peut être irréversible et modifier la compatibilité avec les anciens appareils ; consulter la [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) avant une mise à jour.
 
-Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.0](docs/releases/v2.0.0.md).
+Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.1](docs/releases/v2.0.1.md).
 
 ## Identité et découverte des fonctions
 
@@ -139,14 +139,16 @@ Les détails indiquent le modèle, le fabricant, les Company/Product ID et les m
 
 La liste principale contient les appareils Steinel. Les entrées sans identifiant de fabricant apparaissent séparément sous **Appareils non identifiés** ; les appareils identifiés comme appartenant à un autre fabricant sont exclus. Après l’import, la connexion au cloud et l’import local sont repliés sous **Modifier ou réimporter le réseau** et restent disponibles pour les changements de configuration ultérieurs.
 
-Les réglages demandés apparaissent immédiatement dans l’interface web et Home Assistant, puis sont confirmés en arrière-plan. L’état réel de la sortie et les mesures proviennent des réponses de l’appareil, sans être déduits. Après une commande, la lecture de la sortie est prioritaire et répétée sans attendre le prochain cycle normal. NightmatIQ Plus expose le mode, le seuil crépusculaire, l’éclairement et l’état réel de la sortie, sans commande de luminosité ni durée d’allumage après détection de mouvement.
+Les réglages demandés apparaissent immédiatement dans l’interface web, puis sont confirmés en arrière-plan. Dans Home Assistant, **Output** indique l’état reçu de l’appareil ; la mise en file d’une commande ne le modifie pas. Les autres réglages demandés apparaissent immédiatement en attendant leur confirmation. L’état de la sortie et les mesures ne sont pas déduits des commandes. Après une commande, la lecture de la sortie est prioritaire et répétée sans attendre le prochain cycle normal. NightmatIQ Plus expose le mode, le seuil crépusculaire, l’éclairement et l’état réel de la sortie, sans commande de luminosité ni durée d’allumage après détection de mouvement.
+
+Les sorties disposent d’un calendrier d’interrogation distinct avec un intervalle de base de 2 secondes, adapté au nombre de sorties et aux temps de réponse mesurés. Une réponse manquante isolée est rapidement redemandée ; les échecs répétés d’une même sortie augmentent son intervalle de nouvelle tentative. Le trafic et l’actualisation des autres valeurs peuvent prolonger ces intervalles ; ce ne sont pas des délais maximaux garantis. La valeur actuelle Lightness Actual de la même sortie actualise aussi son état OnOff, sans prendre la valeur cible d’une transition pour l’état actuel. Les réponses de diagnostic des appareils sélectionnés actualisent également leurs états normaux pendant la collecte du rapport.
 
 ## Limites et mémoire
 
 - Un réseau et une paire NetKey/AppKey, jusqu’à **16 appareils importés**, **8 éléments par appareil** et **16 groupes de publication des capteurs**.
 - Les modèles utilisant une autre AppKey ne sont pas exposés pour les commandes.
 - Une file de 16 entrées regroupe les modifications non envoyées ; une entrée est réservée à la poursuite ou au réessai d’une transaction.
-- Une transaction avec réponse à la fois ; vérification de l’adresse, de l’opcode et de la propriété. Réessai d’écriture limité avec le même TID.
+- Une lecture avec réponse à la fois ; vérification de l’adresse, de l’opcode et de la propriété. Les commandes n’attendent pas d’acquittement. Les répétitions sont limitées et conservent le TID lorsque le modèle le définit. Des lectures séparées vérifient l’état réel de l’appareil.
 - Les interrogations sont produites progressivement, sans stocker une file complète par appareil.
 - Un tampon de lecture flash de 512 octets évite de conserver tout le JSON en RAM.
 - La sauvegarde est placée temporairement dans la **partition OTA inactive**. L’importation remplace son ancienne image ; la copie de travail est ensuite effacée.
@@ -159,6 +161,8 @@ Dans les automatisations, vérifiez l’entité **Available** de chaque appareil
 Le diagnostic web affiche la RAM interne libre et le plus grand bloc pendant le fonctionnement. Le rapport de compilation indique séparément l’utilisation statique de RAM et de flash par le micrologiciel.
 
 Pour signaler un autre appareil, ouvrez ses détails et choisissez **Préparer le rapport de l’appareil**. Saisissez le modèle indiqué sur l’étiquette, démarrez la collecte et marquez éventuellement des observations, comme un capteur couvert ou un mouvement. **Télécharger le rapport** arrête la collecte et enregistre un fichier JSON à joindre au signalement. La session en lecture seule dure jusqu’à trois minutes et fonctionne aussi pour les appareils importés non sélectionnés dans HA. Les clés, identifiants de compte, mots de passe, noms privés, UUID et adresses réseau sont exclus. Le rapport contient les Composition Data, modèles SIG/fabricant, réponses brutes, erreurs et indicateurs de données tronquées ou manquantes. La passerelle garde un tampon RAM limité ; le navigateur conserve l’historique. Laissez donc la page ouverte. Si la connexion est perdue, les données collectées restent téléchargeables ; le rapport signale un arrêt non confirmé ou un dernier relevé échoué.
+
+Pour les retards de commande, ouvrez **Réseau Mesh > Diagnostic de la passerelle > Trace des commandes**. Démarrez une capture passive, reproduisez le comportement, puis choisissez **ARRÊTER ET TÉLÉCHARGER LA TRACE**. Les commandes, attentes en file, appels au SDK Bluetooth et réponses sont enregistrés pendant trois minutes au maximum, sans requêtes Mesh supplémentaires. La capture est désactivée par défaut ; la passerelle utilise un tampon fixe de 2 Kio au maximum et le navigateur conserve l’historique. L’export signale les événements manquants. Un appel au SDK ou un retour réussi ne confirme ni la transmission radio ni la commutation physique.
 
 ## Sécurité
 

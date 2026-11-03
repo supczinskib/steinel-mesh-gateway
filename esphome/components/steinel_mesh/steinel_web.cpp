@@ -1188,15 +1188,9 @@ bool SteinelMesh::parse_version_(const std::string &value,
                                     std::array<uint16_t, 3> &version) {
   if (value.empty() || value.size() > AUTO_UPDATE_VERSION_MAX_LENGTH)
     return false;
-  unsigned major = 0;
-  unsigned minor = 0;
-  unsigned patch = 0;
-  char trailing = '\0';
-  if (std::sscanf(value.c_str(), "%u.%u.%u%c", &major, &minor, &patch, &trailing) != 3 ||
-      major > UINT16_MAX || minor > UINT16_MAX || patch > UINT16_MAX)
-    return false;
-  version = {static_cast<uint16_t>(major), static_cast<uint16_t>(minor),
-             static_cast<uint16_t>(patch)};
+  protocol::FirmwareVersion parsed{};
+  if (!protocol::firmware_version(value.data(), value.size(), parsed) || parsed.candidate != 0) return false;
+  version = parsed.core;
   return true;
 }
 
@@ -1677,6 +1671,8 @@ void SteinelMesh::handle_diagnostic_session_(AsyncWebServerRequest *request) {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     if (this->device_diagnostics_.active(millis())) {
       status = 409; error = "{\"message\":\"Another diagnostic session is running\"}";
+    } else if (this->state_trace_.active(millis())) {
+      status = 409; error = "{\"message\":\"Stop command trace before starting device diagnostics\"}";
     } else for (size_t i = 0; i < this->catalog_.count; ++i) {
       if (this->catalog_.nodes[i].address != value) continue;
       status = 503;
@@ -1757,40 +1753,91 @@ void SteinelMesh::handle_diagnostics_(AsyncWebServerRequest *request) {
 }
 
 void SteinelMesh::handle_state_trace_(AsyncWebServerRequest *request) {
+  const uint32_t now = millis();
   if (request->method() == HTTP_POST) {
-    if (request->arg("action") != "reset")
+    const std::string action = request->arg("action").c_str();
+    if (action == "start") {
+      if (!this->catalog_valid_ || !this->mesh_ready_.load() || this->cloud_busy_.load() ||
+          this->reboot_pending_.load() || this->auto_update_running_.load())
+        return send_json_(request, 409, "{\"message\":\"Command trace requires active Mesh\"}");
+      uint32_t id = 0;
+      {
+        std::lock_guard<std::mutex> lock(this->node_mutex_);
+        if (!this->state_trace_.active(now) && !this->device_diagnostics_.active(now)) {
+          id = esp_random();
+          if (!id || id == this->state_trace_.id) id = this->state_trace_.id + 1;
+          if (!id) id = 1;
+          this->state_trace_.start(now, id);
+        }
+      }
+      if (!id) return send_json_(request, 409, "{\"message\":\"Another diagnostic session is running\"}");
+      return send_json_(request, 200, "{\"id\":" + std::to_string(id) + "}");
+    }
+    if (action != "stop" && action != "reset")
       return send_json_(request, 400, "{\"message\":\"Invalid trace action\"}");
+    const std::string parameter = request->arg("id").c_str(); uint32_t id;
+    if (!protocol::decimal_u32(parameter.data(), parameter.size(), 1, UINT32_MAX, id))
+      return send_json_(request, 400, "{\"message\":\"Invalid command trace session\"}");
+    bool matches;
     {
       std::lock_guard<std::mutex> lock(this->node_mutex_);
-      this->state_trace_.clear();
+      matches = this->state_trace_.id == id;
+      if (matches) {
+        this->state_trace_.active(now);
+        if (action == "reset") this->state_trace_.clear();
+        else this->state_trace_.stop(now);
+      }
     }
-    return send_json_(request, 200, "{\"message\":\"State trace reset\"}");
+    if (!matches) return send_json_(request, 409, "{\"message\":\"Command trace session changed\"}");
+    return send_json_(request, 200, "{\"message\":\"Command trace stopped\"}");
   }
+  const std::string parameter = request->arg("id").c_str(); uint32_t id = 0;
+  const std::string cursor = request->arg("after").c_str(); uint32_t after = 0;
+  if ((!parameter.empty() && !protocol::decimal_u32(parameter.data(), parameter.size(), 1, UINT32_MAX, id)) ||
+      (!cursor.empty() && !protocol::decimal_u32(cursor.data(), cursor.size(), 0, UINT32_MAX, after)))
+    return send_json_(request, 400, "{\"message\":\"Invalid command trace cursor\"}");
   std::unique_ptr<protocol::StateTrace> snapshot(new (std::nothrow) protocol::StateTrace);
   if (!snapshot) return send_json_(request, 503, "{\"message\":\"Not enough memory\"}");
   {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
+    this->state_trace_.active(now);
     *snapshot = this->state_trace_;
   }
   const auto &trace = *snapshot;
+  if (id && id != trace.id)
+    return send_json_(request, 409, "{\"message\":\"Command trace session changed\"}");
+  if (after > trace.sequence)
+    return send_json_(request, 409, "{\"message\":\"Command trace cursor changed\"}");
   auto *raw = static_cast<httpd_req_t *>(*request);
   httpd_resp_set_type(raw, "application/json; charset=utf-8");
   httpd_resp_set_hdr(raw, "Cache-Control", "no-store");
   StatusJsonWriter json(raw);
-  json.append("{\"schema\":\"steinel-state-trace/1\",\"gateway_version\":\"");
+  json.append("{\"schema\":\"steinel-state-trace/2\",\"gateway_version\":\"");
   json.escaped(ESPHOME_PROJECT_VERSION); json.append("\"");
-  json.number(",\"uptime_ms\":", millis()); json.number(",\"sequence\":", trace.sequence);
-  json.number(",\"incident_at_ms\":", trace.incident_at); json.number(",\"incident_node\":", trace.incident_node);
-  json.append(",\"captured\":"); json.append(trace.captured ? "true" : "false");
-  json.append(",\"frozen\":"); json.append(trace.frozen ? "true" : "false");
+  json.number(",\"id\":", trace.id); json.number(",\"uptime_ms\":", now);
+  json.number(",\"started_at_ms\":", trace.started_at);
+  json.number(",\"elapsed_ms\":", trace.id ? (trace.running ? now : trace.stopped_at) - trace.started_at : 0);
+  json.number(",\"sequence\":", trace.sequence);
+  const uint32_t oldest = trace.count ? trace.entry(0).sequence : trace.sequence + 1;
+  json.number(",\"missed_events\":", oldest > after + 1 ? oldest - after - 1 : 0);
+  json.number(",\"buffer_events\":", trace.entries.size());
+  json.number(",\"buffer_bytes\":", sizeof(protocol::StateTrace));
+  json.number(",\"duration_limit_ms\":", protocol::StateTrace::DURATION_MS);
+  json.append(",\"running\":"); json.append(trace.running ? "true" : "false");
+  json.append(",\"expired\":"); json.append(trace.expired ? "true" : "false");
   json.append(",\"events\":[");
   for (size_t i = 0; i < trace.count; ++i) {
-    const auto &entry = trace.entry(i); if (i) json.append(",");
-    json.number("{\"at_ms\":", entry.at); json.number(",\"node\":", entry.node);
+    const auto &entry = trace.entry(i); if (entry.sequence <= after) continue;
+    if (entry.sequence != std::max(oldest, after + 1)) json.append(",");
+    json.number("{\"sequence\":", entry.sequence);
+    json.number(",\"at_ms\":", entry.at); json.number(",\"elapsed_ms\":", entry.at - trace.started_at);
+    json.number(",\"node\":", entry.node);
     json.number(",\"address\":", entry.address); json.number(",\"event\":", entry.event);
     json.number(",\"sdk_event\":", entry.sdk_event); json.number(",\"opcode\":", entry.opcode);
     json.number(",\"request\":", entry.request); json.number(",\"kind\":", entry.kind);
     json.number(",\"step\":", entry.step); json.number(",\"tid\":", entry.tid);
+    json.number(",\"queue_depth\":", entry.queue_depth); json.number(",\"attempt\":", entry.attempt);
+    json.number(",\"flags\":", entry.flags); json.number(",\"detail\":", entry.detail);
     json.signed_number(",\"error\":", entry.error);
     json.signed_number(",\"before_on\":", entry.before_on); json.signed_number(",\"after_on\":", entry.after_on);
     json.signed_number(",\"before_auto\":", entry.before_auto); json.signed_number(",\"after_auto\":", entry.after_auto);
@@ -2348,12 +2395,10 @@ void SteinelMesh::handle_auto_update_(AsyncWebServerRequest *request) {
   const std::string url = request->arg("url").c_str();
   const std::string digest_text = request->arg("sha256").c_str();
   uint32_t image_size = 0;
-  std::array<uint16_t, 3> target_version{};
-  std::array<uint16_t, 3> current_version{};
   std::array<uint8_t, 32> digest{};
-  if (!parse_version_(version, target_version) ||
-      !parse_version_(ESPHOME_PROJECT_VERSION, current_version) ||
-      target_version <= current_version || !parse_sha256_(digest_text, digest) ||
+  if (!protocol::newer_stable_firmware(version.data(), version.size(),
+          ESPHOME_PROJECT_VERSION, std::strlen(ESPHOME_PROJECT_VERSION)) ||
+      !parse_sha256_(digest_text, digest) ||
       !parse_u32_(request->arg("size").c_str(), 1, UINT32_MAX, image_size))
     return send_json_(request, 400,
                       "{\"message\":\"Invalid or non-newer firmware release\"}");

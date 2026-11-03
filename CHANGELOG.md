@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.0.1 — 2026-11-03
+
+- Send On/Off, brightness, automatic-control and LC-property writes without waiting for acknowledgements, with one bounded repetition and separate state verification.
+- Prioritize fresh commands, discard superseded repetitions and finish bounded repeats before slow readbacks while retaining background polling slots.
+- Schedule output reads independently of discovery and stale optional values, with adaptive intervals, bounded read timeouts and per-output retry backoff.
+- Recover output reads through same-element Lightness on confirmed dimmable devices, using present values rather than transition targets.
+- Publish device-confirmed Output state in Home Assistant so pending commands cannot incorrectly satisfy or block automation conditions. Preserve entity identities and immediate pending settings in the web interface.
+- Update selected-device states from diagnostic replies and unsolicited publications; accept late replies without completing unrelated requests and resume polling when authenticated state updates establish availability.
+- Prioritize due output reads over diagnostic probes and keep diagnostic collection progressing when optional properties do not reply.
+- Add a manually started, passive command trace for all devices, with a fixed gateway buffer, browser-side history, JSON download and missing-event indicators.
+- Recognize L 840 SC (`0x1e7e`) and L 840 C (`0x1eba`) product identifiers while retaining imported device names.
+- Allow release candidates to update to the matching stable release without offering an older stable version.
+- Update documentation and add regression coverage for command ordering, missing replies, diagnostics, state expiry and Home Assistant automation conditions.
+
+Remaining physical lamp activation delays are still under investigation; their cause has not been isolated. See the [release description](docs/releases/v2.0.1.md).
+
 ## 2.0.0 — 2026-10-05
 
 - Rename the project and repository to Steinel Mesh Gateway and document multi-device scope.

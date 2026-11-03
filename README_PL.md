@@ -8,7 +8,7 @@
 Urządzenia Steinel <-> Bluetooth Mesh <-> bramka ESP32-C3 -> Home Assistant
 ```
 
-Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.0** obsługuje wiele urządzeń z jednej sieci.
+Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.1** obsługuje wiele urządzeń z jednej sieci.
 
 Autor i opiekun: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -140,7 +140,7 @@ O zgodności decyduje rzeczywisty układ modeli i firmware urządzenia, nie sama
 
 Wszystkie pozycje wymagają prawidłowego backupu sieci Connect, Company ID `0x0563`, obsługiwanych modeli przypisanych do importowanego AppKey i spełnienia limitów poniżej. Lista nie obejmuje starszego własnościowego Bluetooth, zwykłych wersji bez łączności, urządzeń wyłącznie Z-Wave/KNX/DALI ani przycisków mających tylko modele klienckie. Konwersja Mesh może być nieodwracalna i zmieniać zgodność ze starszymi urządzeniami; przed aktualizacją lampy sprawdź [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/).
 
-Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.0](docs/releases/v2.0.0.md).
+Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.1](docs/releases/v2.0.1.md).
 
 ## Identyfikacja i wykrywanie funkcji
 
@@ -150,14 +150,16 @@ Szczegóły pokazują model, producenta, Company/Product ID i modele Mesh, a tak
 
 Główna lista zawiera urządzenia Steinel. Wpisy bez identyfikatora producenta trafiają do osobnej sekcji **Nierozpoznane urządzenia**; urządzenia rozpoznane jako inny producent są pomijane. Po imporcie logowanie do chmury i import lokalnego backupu są zwinięte w sekcji **Zmień lub ponownie importuj sieć** i pozostają dostępne na potrzeby późniejszej zmiany konfiguracji.
 
-Wybrane ustawienia pojawiają się od razu w WWW i Home Assistant, a ich potwierdzenie odbywa się w tle. Rzeczywisty stan wyjścia i pomiary pochodzą z odpowiedzi urządzenia, nie z wyliczeń. Odczyt wyjścia po zmianie sterowania ma pierwszeństwo i jest ponawiany bez czekania na kolejny zwykły cykl odpytywania. NightmatIQ Plus udostępnia tryb pracy, próg zmierzchowy, natężenie oświetlenia i rzeczywisty stan wyjścia, bez sterowania jasnością ani czasu świecenia po wykryciu ruchu.
+Wybrane ustawienia pojawiają się od razu w WWW, a ich potwierdzenie odbywa się w tle. W Home Assistant encja **Output** pokazuje stan otrzymany z urządzenia; samo dodanie polecenia do kolejki go nie zmienia. Pozostałe wybrane ustawienia pojawiają się od razu podczas oczekiwania na potwierdzenie. Stan wyjścia i pomiary nie są wyliczane z poleceń. Odczyt wyjścia po zmianie sterowania ma pierwszeństwo i jest ponawiany bez czekania na kolejny zwykły cykl odpytywania. NightmatIQ Plus udostępnia tryb pracy, próg zmierzchowy, natężenie oświetlenia i rzeczywisty stan wyjścia, bez sterowania jasnością ani czasu świecenia po wykryciu ruchu.
+
+Wyjścia mają osobny harmonogram odczytów z bazowym odstępem 2 sekund, dostosowanym do liczby wyjść i zmierzonych czasów odpowiedzi. Pojedynczy brak odpowiedzi jest szybko ponawiany; kolejne niepowodzenia odczytu tego wyjścia wydłużają odstęp między próbami. Ruch w sieci i konieczność odświeżenia innych wartości mogą wydłużyć te odstępy; nie są one gwarantowanym maksymalnym czasem opóźnienia. Bieżąca wartość Lightness Actual z tego samego wyjścia aktualizuje również jego stan OnOff, bez traktowania docelowej jasności przejścia jako stanu obecnego. Odpowiedzi diagnostyczne wybranych urządzeń aktualizują ich zwykłe stany podczas zbierania raportu.
 
 ## Limity i RAM
 
 - Jedna sieć i jedna para NetKey/AppKey, do **16 importowanych urządzeń**, **8 elementów na urządzenie** i **16 grup publikacji czujników**.
 - Modele wymagające innego AppKey nie są udostępniane do sterowania.
 - Kolejka 16 wpisów łączy niewysłane zmiany; jeden wpis jest zarezerwowany na kontynuację lub ponowną próbę transakcji.
-- Jedna transakcja wymagająca odpowiedzi naraz; kontrola adresu, opcode i właściwości. Ograniczona ponowna próba zapisu z tym samym TID.
+- Jeden odczyt wymagający odpowiedzi naraz; kontrola adresu, opcode i właściwości. Komendy sterujące nie czekają na potwierdzenie. Liczba powtórzeń jest ograniczona, z zachowaniem TID, jeżeli model go definiuje. Osobne odczyty sprawdzają rzeczywisty stan urządzenia.
 - Odczyty są tworzone kolejno, bez rozbudowanej kolejki wszystkich urządzeń.
 - Czytnik flash z buforem 512 bajtów nie przechowuje całego JSON w RAM.
 - Backup jest tymczasowo zapisywany w **nieaktywnej partycji OTA**. Import nadpisuje poprzedni obraz tej partycji; dane robocze są potem kasowane.
@@ -172,6 +174,8 @@ Aby zgłosić kolejne urządzenie, otwórz jego szczegóły i wybierz **Przygotu
 Stan wyjścia i sterowanie automatyczne są wyborami On/Off w HA. Po wygaśnięciu ich odczytów stan staje się nieznany. Szczegóły urządzenia pokazują do ośmiu surowych właściwości Sensor, osobno dla każdego elementu, z wiekiem danych i oznaczeniem skrócenia. Ten sam ograniczony zestaw udostępnia domyślnie wyłączona encja tekstowa **Sensor diagnostics** w HA. Odczyty nie są zapisywane do flasha.
 
 W automatyzacjach sprawdzaj encję **Available** danego urządzenia. Stan wyjścia i automatyki jest wyborem On/Off; po wygaśnięciu odczytu staje się nieznany. Brama odrzuca sterowanie urządzeniami bez świeżej odpowiedzi lub przy potwierdzonej niezgodności Composition Data.
+
+Przy opóźnieniach poleceń otwórz **Sieć Mesh > Diagnostyka bramy > Ślad poleceń**. Rozpocznij pasywny zapis, odtwórz zachowanie i wybierz **ZATRZYMAJ I POBIERZ ZAPIS**. Przez maksymalnie trzy minuty zapisywane są polecenia, oczekiwanie w kolejce, wywołania SDK Bluetooth i odpowiedzi, bez dodatkowych zapytań Mesh. Zapis jest domyślnie wyłączony; bramka używa stałego bufora do 2 KiB, a historię przechowuje przeglądarka. Eksport oznacza brakujące zdarzenia. Wywołanie SDK lub jego pomyślny wynik nie potwierdzają transmisji radiowej ani fizycznego przełączenia.
 
 ## Bezpieczeństwo
 

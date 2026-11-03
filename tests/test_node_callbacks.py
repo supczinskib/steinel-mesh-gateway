@@ -48,6 +48,7 @@ class SteinelMesh {
   struct State {
     bool composition_checked=true,composition_matches=true,dirty=false,brightness_known=false;
     uint16_t supported=0,brightness=0;int8_t on=-1,automatic=-1;
+    uint8_t output_failures{0},failures{0};uint32_t retry_at{0};
     uint32_t threshold=0,run_time=0,last_seen=0,value_seen[7]{};
   };
   struct NodeRequest { uint8_t node,element,kind,attempts,tid;uint32_t value;uint8_t step{};bool diagnostic{false}; };
@@ -145,15 +146,29 @@ int main() {
   assert(g.node_light_event_(0,&light));assert(g.node_states_[0].on==1);
   params.ctx.addr=11;light.status_cb.lc_light_onoff_status.present_light_onoff=0;
   assert(!g.node_light_event_(0,&light));assert(g.node_states_[0].on==1);
-  g.state_trace_.clear();
+  g.state_trace_.start(1000,1);
   params.ctx.addr=10;params.ctx.recv_op=ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS;
   generic.status_cb.onoff_status={true,0,1,0x41};
   assert(g.node_generic_event_(0,&generic));
   const auto &trace=g.state_trace_.entry(0);
-  assert(g.state_trace_.captured && trace.before_on==1 && trace.after_on==0);
+  assert(g.state_trace_.running && trace.before_on==1 && trace.after_on==0);
   assert(trace.before_auto==1 && trace.after_auto==1 && trace.length==3);
   assert(trace.raw[0]==0 && trace.raw[1]==1 && trace.raw[2]==0x41);
   assert(trace.request==params.opcode && trace.opcode==params.ctx.recv_op);
+  // A late or unsolicited state updates HA without completing an unrelated read.
+  begin(AUTO,0,0,ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS);
+  params.opcode=params.ctx.recv_op=ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS;
+  g.node_states_[0].output_failures=4;generic.status_cb.onoff_status={false,1,0,0};
+  g.node_states_[0].failures=4;g.node_states_[0].retry_at=60000;
+  assert(g.node_generic_event_(ESP_BLE_MESH_GENERIC_CLIENT_PUBLISH_EVT,&generic));
+  assert(g.node_states_[0].on==1 && g.node_states_[0].output_failures==0 && !g.completed);
+  assert(g.node_states_[0].failures==0 && g.node_states_[0].retry_at==0);
+  params.opcode=params.ctx.recv_op=ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS;
+  light.status_cb.lightness_status={false,0,0};
+  g.node_states_[0].failures=4;g.node_states_[0].retry_at=60000;
+  assert(g.node_light_event_(ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT,&light));
+  assert(g.node_states_[0].on==0 && !g.completed && g.access_operation_==SteinelMesh::AccessOperation::NODE);
+  assert(g.node_states_[0].failures==0 && g.node_states_[0].retry_at==0);
   std::puts("Production callbacks: requested values, LC preparation, unrelated responses and transition targets passed");
 }
 '''

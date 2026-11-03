@@ -1,0 +1,1155 @@
+{
+  "schema": "steinel-device-report/1",
+  "gateway_version": "2.0.1-rc.1",
+  "elapsed_ms": 180000,
+  "probe_complete": true,
+  "device": {
+    "label_model": "L 840 SC",
+    "identity_source": "imported_catalog",
+    "revision_source": "gateway_cache",
+    "company": 1379,
+    "product": 7806,
+    "firmware": "1.2.3",
+    "hardware": "",
+    "elements": [
+      {
+        "index": 0,
+        "capabilities": 51,
+        "bound": true
+      },
+      {
+        "index": 1,
+        "capabilities": 5,
+        "bound": true
+      },
+      {
+        "index": 2,
+        "capabilities": 8,
+        "bound": true
+      },
+      {
+        "index": 3,
+        "capabilities": 8,
+        "bound": true
+      }
+    ],
+    "composition": {
+      "length": 102,
+      "valid": true,
+      "truncated": false,
+      "raw": "63057e1e83089000030000000f0200000200001004100210061007100013011306120712001201120312041263050b1063050d100000050400100f13101301100512630501106305061063050410630505100000020100110111630503100000020000110111"
+    },
+    "models": {
+      "company": 1379,
+      "product": 7806,
+      "vid": 2179,
+      "crpl": 144,
+      "features": 3,
+      "elements": [
+        {
+          "index": 0,
+          "location": 0,
+          "sig_models": [
+            0,
+            2,
+            4096,
+            4100,
+            4098,
+            4102,
+            4103,
+            4864,
+            4865,
+            4614,
+            4615,
+            4608,
+            4609,
+            4611,
+            4612
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4107
+            },
+            {
+              "company": 1379,
+              "model": 4109
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "location": 0,
+          "sig_models": [
+            4096,
+            4879,
+            4880,
+            4097,
+            4613
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4097
+            },
+            {
+              "company": 1379,
+              "model": 4102
+            },
+            {
+              "company": 1379,
+              "model": 4100
+            },
+            {
+              "company": 1379,
+              "model": 4101
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "location": 0,
+          "sig_models": [
+            4352,
+            4353
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4099
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "location": 0,
+          "sig_models": [
+            4352,
+            4353
+          ],
+          "vendor_models": []
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "sequence": 1,
+      "elapsed_ms": 67,
+      "element": 0,
+      "event": 0,
+      "opcode": 32776,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 2,
+      "elapsed_ms": 5832,
+      "element": 0,
+      "event": 0,
+      "opcode": 33281,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 3,
+      "elapsed_ms": 5892,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 4,
+      "elapsed_ms": 9324,
+      "element": 0,
+      "event": 0,
+      "opcode": 33355,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 5,
+      "elapsed_ms": 11702,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 6,
+      "elapsed_ms": 12330,
+      "element": 0,
+      "event": 3,
+      "opcode": 33358,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 7,
+      "elapsed_ms": 13437,
+      "element": 2,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "4008c8"
+    },
+    {
+      "sequence": 8,
+      "elapsed_ms": 15396,
+      "element": 2,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 9,
+      "elapsed_ms": 15757,
+      "element": 1,
+      "event": 0,
+      "opcode": 33425,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 10,
+      "elapsed_ms": 15814,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 11,
+      "elapsed_ms": 19253,
+      "element": 1,
+      "event": 0,
+      "opcode": 33437,
+      "property": 43,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 12,
+      "elapsed_ms": 19379,
+      "element": 1,
+      "event": 2,
+      "opcode": 100,
+      "property": 43,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "e80300"
+    },
+    {
+      "sequence": 13,
+      "elapsed_ms": 19389,
+      "element": 2,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "4008c8"
+    },
+    {
+      "sequence": 14,
+      "elapsed_ms": 19701,
+      "element": 1,
+      "event": 2,
+      "opcode": 100,
+      "property": 43,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "e80300"
+    },
+    {
+      "sequence": 15,
+      "elapsed_ms": 23130,
+      "element": 1,
+      "event": 0,
+      "opcode": 33437,
+      "property": 60,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 16,
+      "elapsed_ms": 26135,
+      "element": 1,
+      "event": 3,
+      "opcode": 100,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 17,
+      "elapsed_ms": 29562,
+      "element": 2,
+      "event": 0,
+      "opcode": 33328,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 18,
+      "elapsed_ms": 31682,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 19,
+      "elapsed_ms": 32567,
+      "element": 2,
+      "event": 3,
+      "opcode": 81,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 20,
+      "elapsed_ms": 35997,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 21,
+      "elapsed_ms": 39002,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 22,
+      "elapsed_ms": 41728,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 23,
+      "elapsed_ms": 42431,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 78,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 24,
+      "elapsed_ms": 45436,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 25,
+      "elapsed_ms": 48874,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 14,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 26,
+      "elapsed_ms": 51872,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 27,
+      "elapsed_ms": 52472,
+      "element": 1,
+      "event": 2,
+      "opcode": 100,
+      "property": 60,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "c0d401"
+    },
+    {
+      "sequence": 28,
+      "elapsed_ms": 55909,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 16,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 29,
+      "elapsed_ms": 58914,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 30,
+      "elapsed_ms": 62344,
+      "element": 3,
+      "event": 0,
+      "opcode": 33328,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 31,
+      "elapsed_ms": 65349,
+      "element": 3,
+      "event": 3,
+      "opcode": 81,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 32,
+      "elapsed_ms": 65683,
+      "element": 2,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 33,
+      "elapsed_ms": 71728,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 34,
+      "elapsed_ms": 72324,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 35,
+      "elapsed_ms": 72445,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 36,
+      "elapsed_ms": 75881,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 78,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 37,
+      "elapsed_ms": 75919,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 38,
+      "elapsed_ms": 79348,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 14,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 39,
+      "elapsed_ms": 82353,
+      "element": 3,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 40,
+      "elapsed_ms": 85783,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 16,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 41,
+      "elapsed_ms": 88788,
+      "element": 3,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 42,
+      "elapsed_ms": 91681,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 43,
+      "elapsed_ms": 92218,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 44,
+      "elapsed_ms": 95223,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 45,
+      "elapsed_ms": 98651,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 46,
+      "elapsed_ms": 101656,
+      "element": 3,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 47,
+      "elapsed_ms": 101721,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 48,
+      "elapsed_ms": 105907,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 49,
+      "elapsed_ms": 106016,
+      "element": 2,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 50,
+      "elapsed_ms": 109583,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 51,
+      "elapsed_ms": 109697,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 52,
+      "elapsed_ms": 111214,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 53,
+      "elapsed_ms": 114219,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 54,
+      "elapsed_ms": 121211,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 55,
+      "elapsed_ms": 121287,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 56,
+      "elapsed_ms": 121681,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 57,
+      "elapsed_ms": 122796,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 58,
+      "elapsed_ms": 122922,
+      "element": 2,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 59,
+      "elapsed_ms": 124428,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 60,
+      "elapsed_ms": 124570,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 61,
+      "elapsed_ms": 125978,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 62,
+      "elapsed_ms": 131737,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 63,
+      "elapsed_ms": 132581,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 64,
+      "elapsed_ms": 136349,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 65,
+      "elapsed_ms": 141672,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 66,
+      "elapsed_ms": 145243,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c4094c0400"
+    },
+    {
+      "sequence": 67,
+      "elapsed_ms": 145768,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409bc0200"
+    },
+    {
+      "sequence": 68,
+      "elapsed_ms": 151716,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 69,
+      "elapsed_ms": 153034,
+      "element": 1,
+      "event": 2,
+      "opcode": 100,
+      "property": 43,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "e80300"
+    },
+    {
+      "sequence": 70,
+      "elapsed_ms": 156469,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 71,
+      "elapsed_ms": 159474,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 72,
+      "elapsed_ms": 161725,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 73,
+      "elapsed_ms": 162909,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 74,
+      "elapsed_ms": 162969,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 75,
+      "elapsed_ms": 166403,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 76,
+      "elapsed_ms": 166439,
+      "element": 2,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 77,
+      "elapsed_ms": 169881,
+      "element": 3,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 78,
+      "elapsed_ms": 169930,
+      "element": 3,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 79,
+      "elapsed_ms": 173362,
+      "element": 2,
+      "event": 0,
+      "opcode": 33329,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 80,
+      "elapsed_ms": 176368,
+      "element": 2,
+      "event": 3,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 81,
+      "elapsed_ms": 177042,
+      "element": 2,
+      "event": 2,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 3,
+      "truncated": false,
+      "raw": "400800"
+    },
+    {
+      "sequence": 82,
+      "elapsed_ms": 177316,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    }
+  ],
+  "observations": [
+    {
+      "elapsed_ms": 0,
+      "condition": "baseline"
+    },
+    {
+      "elapsed_ms": 3388,
+      "condition": "baseline"
+    },
+    {
+      "elapsed_ms": 16057,
+      "condition": "light_on"
+    }
+  ],
+  "missed_events": 0,
+  "event_limit_reached": false,
+  "payload_encoding": "Raw Sensor/Descriptor buffers; generic/light replies contain decoded present values in little endian. Composition Data is page 0.",
+  "observation_clock": "Browser-relative milliseconds from collection start; packet times use the gateway clock.",
+  "event_types": [
+    "sent",
+    "send_error",
+    "response",
+    "request_failed",
+    "invalid",
+    "publication"
+  ],
+  "limits": {
+    "composition_bytes": 512,
+    "packet_bytes": 128,
+    "gateway_events": 8,
+    "report_events": 512,
+    "observations": 32
+  },
+  "last_read_failed": false
+}

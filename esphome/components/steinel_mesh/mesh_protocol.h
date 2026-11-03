@@ -33,6 +33,43 @@ constexpr uint16_t SCENE = 16;
 constexpr uint16_t SCHEDULER = 32;
 constexpr uint16_t UNKNOWN_BINDING = 0xFFFF;
 constexpr uint32_t UNKNOWN_24 = 0xFFFFFF;
+constexpr size_t MAX_FIRMWARE_VERSION_LENGTH = 23;
+
+struct FirmwareVersion {
+  std::array<uint16_t, 3> core{};
+  uint16_t candidate{0};
+};
+inline bool firmware_version(const char *text, size_t length, FirmwareVersion &output) {
+  if (text == nullptr || length == 0 || length > MAX_FIRMWARE_VERSION_LENGTH) return false;
+  FirmwareVersion parsed{};
+  size_t offset = 0;
+  const auto number = [&](uint16_t &value) {
+    const size_t start = offset;
+    while (offset < length && text[offset] >= '0' && text[offset] <= '9') ++offset;
+    uint32_t result;
+    if (offset == start || (offset - start > 1 && text[start] == '0') ||
+        !decimal_u32(text + start, offset - start, 0, UINT16_MAX, result)) return false;
+    value = uint16_t(result); return true;
+  };
+  for (size_t i = 0; i < parsed.core.size(); ++i) {
+    if (i && (offset == length || text[offset++] != '.')) return false;
+    if (!number(parsed.core[i])) return false;
+  }
+  if (offset != length) {
+    if (length - offset < 5 || std::memcmp(text + offset, "-rc.", 4) != 0) return false;
+    offset += 4;
+    if (!number(parsed.candidate) || parsed.candidate == 0) return false;
+  }
+  if (offset != length) return false;
+  output = parsed; return true;
+}
+inline bool newer_stable_firmware(const char *target, size_t target_length,
+                                   const char *current, size_t current_length) {
+  FirmwareVersion next{}, installed{};
+  return firmware_version(target, target_length, next) && next.candidate == 0 &&
+      firmware_version(current, current_length, installed) &&
+      (next.core > installed.core || (next.core == installed.core && installed.candidate != 0));
+}
 // Model presence and individual function support are tracked separately.
 constexpr uint16_t F_OUTPUT = 1, F_BRIGHTNESS = 2, F_AUTO = 4, F_THRESHOLD = 8,
                    F_RUN_TIME = 16, F_LUX = 32, F_MOTION = 64, F_MODE = 128;
@@ -45,6 +82,8 @@ inline const char *product_name(uint16_t company, uint16_t product) {
     case 0x1DE0: return "IS 180";
     case 0x1E74: return "L 820 SC";
     case 0x1E79: return "L 810 SC";
+    case 0x1E7E: return "L 840 SC";
+    case 0x1EBA: return "L 840 C";
     case 0x1EBD: return "L 810 C";
     case 0x1F27: return "L 42 SC";
     default: return "";
@@ -322,55 +361,81 @@ struct DeviceDiagnostics {
 static_assert(sizeof(DeviceDiagnostics) <= 2048, "One bounded diagnostic session per gateway");
 
 struct StateTrace {
-  enum Event : uint8_t { QUEUED, SEND, RESPONSE, TIMEOUT, SEND_ERROR };
+  static constexpr uint32_t DURATION_MS = 180000;
+  enum Event : uint8_t { QUEUED, SEND, RESPONSE, TIMEOUT, SEND_ERROR, SDK_RESULT, COMPLETED, WAIT, RECEIVED };
+  enum Blocker : uint16_t {
+    NOT_READY = 1, RESTARTING = 2, COMPLETION_PENDING = 4, ACCESS_BUSY = 8,
+    COMPOSITION_BUSY = 16, CONTROL_BUSY = 32, CONTROL_PENDING = 64, LEGACY_POLL = 128,
+    REQUEST_GAP = 256
+  };
   struct Entry {
-    uint32_t at{}, opcode{}, request{};
+    uint32_t sequence{}, at{}, opcode{}, request{}, detail{};
     int32_t error{};
-    uint16_t node{}, address{};
+    uint16_t node{}, address{}, flags{};
+    uint8_t queue_depth{}, attempt{};
     uint8_t event{}, sdk_event{}, kind{}, step{}, tid{}, length{};
     int8_t before_on{-1}, before_auto{-1}, after_on{-1}, after_auto{-1};
     std::array<uint8_t, 3> raw{};
   };
   std::array<Entry, 32> entries{};
-  uint32_t sequence{}, incident_at{};
-  uint16_t incident_node{};
-  uint8_t head{}, count{}, remaining{};
-  bool captured{}, frozen{};
+  uint32_t id{}, started_at{}, stopped_at{}, sequence{};
+  uint32_t wait_request{};
+  uint16_t wait_flags{}, wait_address{};
+  uint8_t head{}, count{}, wait_depth{};
+  bool running{}, expired{};
 
   void clear() {
-    sequence = incident_at = 0; incident_node = 0;
-    head = count = remaining = 0; captured = frozen = false;
+    *this = StateTrace{};
+  }
+  void start(uint32_t now, uint32_t session) {
+    clear(); id = session; started_at = now; running = true;
+  }
+  void stop(uint32_t now) {
+    if (running) stopped_at = now;
+    running = false;
+  }
+  bool active(uint32_t now) {
+    if (running && now - started_at >= DURATION_MS) {
+      stop(started_at + DURATION_MS); expired = true;
+    }
+    return running;
   }
 
   void record(uint32_t now, uint16_t node, uint16_t address, Event event,
               uint32_t opcode, uint32_t request, uint8_t sdk_event, uint8_t kind,
               uint8_t step, uint8_t tid, int8_t before_on, int8_t before_auto,
               int8_t after_on, int8_t after_auto, const uint8_t *data = nullptr,
-              size_t length = 0, int32_t error = 0) {
-    if (frozen || (captured && node != incident_node) || (length && data == nullptr)) return;
+              size_t length = 0, int32_t error = 0, uint8_t queue_depth = 0,
+              uint8_t attempt = 0, uint16_t flags = 0, uint32_t detail = 0) {
+    if (!active(now) || (length && data == nullptr)) return;
     auto &entry = entries[head]; entry = Entry{};
+    entry.sequence = ++sequence;
     entry.at = now; entry.node = node; entry.address = address;
     entry.event = event; entry.opcode = opcode; entry.request = request;
     entry.sdk_event = sdk_event; entry.kind = kind; entry.step = step; entry.tid = tid;
     entry.before_on = before_on; entry.before_auto = before_auto;
     entry.after_on = after_on; entry.after_auto = after_auto; entry.error = error;
+    entry.queue_depth = queue_depth; entry.attempt = attempt; entry.flags = flags; entry.detail = detail;
     entry.length = std::min(length, entry.raw.size());
     if (entry.length) std::memcpy(entry.raw.data(), data, entry.length);
     head = (head + 1) % entries.size();
     if (count < entries.size()) ++count;
-    ++sequence;
-    if (captured) {
-      if (remaining && --remaining == 0) frozen = true;
-    } else if (event == RESPONSE && error == 0 &&
-               ((before_on == 1 && after_on == 0) || (before_auto == 1 && after_auto == 0))) {
-      captured = true; incident_at = now; incident_node = node; remaining = 16;
-    }
+  }
+  void wait(uint32_t now, uint8_t depth, uint16_t flags, uint16_t address,
+            uint32_t request, uint32_t delay) {
+    if (!active(now)) return;
+    if (depth == 0) flags = 0;
+    if (flags == wait_flags && address == wait_address && request == wait_request && depth == wait_depth) return;
+    const bool relevant = flags != 0 || wait_flags != 0;
+    wait_flags = flags; wait_address = address; wait_request = request; wait_depth = depth;
+    if (relevant) record(now, 0, address, WAIT, 0, request, 0, 0, 0, 0,
+                         -1, -1, -1, -1, nullptr, 0, 0, depth, 0, flags, delay);
   }
   const Entry &entry(size_t index) const {
     return entries[(head + entries.size() - count + index) % entries.size()];
   }
 };
-static_assert(sizeof(StateTrace) <= 1280, "State trace must remain bounded per gateway");
+static_assert(sizeof(StateTrace) <= 2048, "Command trace uses at most 2 KiB per gateway");
 
 inline uint32_t stale_interval(size_t fields) {
   return std::max<uint32_t>(180000, uint32_t(fields) * 3700 + 60000);

@@ -55,11 +55,12 @@ class SteinelMesh {
  public:
   protocol::DeviceDiagnostics device_diagnostics_{};
   protocol::StateTrace state_trace_{};
+  uint8_t node_queue_count_{};
   template<class P>bool diagnostic_reply_(const P*,uint32_t,bool,uint16_t=0){return false;}
   void record_diagnostic_(uint16_t,protocol::DeviceDiagnostics::Event,uint32_t,uint16_t=0,const uint8_t * =nullptr,size_t=0,int32_t=0){}
   struct NodeRequest { uint8_t node, element, kind, attempts, tid; uint32_t value; uint8_t step{0}; bool diagnostic{false}; };
   bool diagnostic_request_allowed_(const NodeRequest &request) { return request.diagnostic && !(request.kind>=7&&request.kind<=11)&&request.kind!=14; }
-  struct State { bool composition_checked{true},composition_matches{true}; uint32_t last_seen{1000},stale_after{180000}; uint16_t supported{255}; int8_t on{-1},automatic{-1}; };
+  struct State { bool composition_checked{true},composition_matches{true}; uint32_t last_seen{1000},stale_after{180000}; uint16_t supported{255}; int8_t on{-1},automatic{-1}; std::array<uint32_t,7> value_poll_at{}; };
   struct Config { uint16_t net_key_index{2}, app_key_index{3}; } config_;
   enum class AccessOperation { NODE };
   protocol::Catalog catalog_; std::array<State, protocol::MAX_NODES> node_states_{};
@@ -78,7 +79,7 @@ class SteinelMesh {
 '''
 SDK_SET = r'''
 int esp_ble_mesh_light_client_set_state(esp_ble_mesh_client_common_param_t *p, esp_ble_mesh_light_client_set_state_t *s) {
-  if (p->opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET) { value=s->lightness_set.lightness; tid=s->lightness_set.tid; }
+  if (p->opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK) { value=s->lightness_set.lightness; tid=s->lightness_set.tid; }
   else if (p->opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET || p->opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK) value=s->lc_mode_set.mode;
   else { property=s->lc_property_set.property_id; const auto *b=s->lc_property_set.property_value;
     assert(b && b->len==3 && b->size==3); value=b->data[0] | uint32_t(b->data[1])<<8 | uint32_t(b->data[2])<<16; }
@@ -100,13 +101,13 @@ int main() {
     assert(captured.ctx.net_idx==2 && captured.ctx.send_ttl==7);
   };
   send(COMPOSITION,0); assert(captured.ctx.app_idx==ESP_BLE_MESH_KEY_DEV && captured.model->keys[0]==ESP_BLE_MESH_KEY_DEV && captured.msg_timeout==4000);
-  send(ON,3);assert(captured.msg_timeout==3000);
-  send(AUTO,1);assert(captured.msg_timeout==3000);
+  send(ON,3);assert(captured.msg_timeout==1200);
+  send(AUTO,1);assert(captured.msg_timeout==1200);
   send(SET_ON,3,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK && captured.ctx.addr==11 && value==0);
-  send(SET_ON,3,1,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET && captured.ctx.addr==13 && value==1 && tid==37);
+  send(SET_ON,3,1,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK && captured.ctx.addr==13 && value==1 && tid==37);
   send(SET_LEVEL,3,65535); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK && captured.ctx.addr==11 && value==0);
-  send(SET_LEVEL,3,65535,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET && value==65535 && tid==37);
-  send(SET_AUTO,1,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET && value==1);
+  send(SET_LEVEL,3,65535,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK && value==65535 && tid==37);
+  send(SET_AUTO,1,1); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK && value==1);
   send(SET_THRESHOLD,1,123456); assert(property==0x002B && value==123456 && g.node_expected_property_==0x002B);
   send(SET_RUN,1,654321); assert(property==0x003C && value==654321);
   send(SENSOR_PROPERTY,2,0x004E); assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_SENSOR_GET && property==0x004E && value==1);
@@ -115,7 +116,7 @@ int main() {
   n.nightmatiq=true;
   send(ON,3);assert(captured.msg_timeout==1200);
   send(AUTO,1);assert(captured.msg_timeout==1200);
-  send(THRESHOLD,1);assert(captured.msg_timeout==3000);
+  send(THRESHOLD,1);assert(captured.msg_timeout==1200);
   assert(!g.send_node_request_({0,1,SET_RUN,0,37,1000}));
   for (uint32_t mode=0; mode<3; ++mode) for (uint8_t step=0; step<4; ++step) {
     send(SET_MODE,1,mode,step);
@@ -144,11 +145,11 @@ int main() {
     send(SET_ON,0,1);
     assert(captured.ctx.addr==0x101&&captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK&&value==0);
     send(SET_ON,0,1,1);
-    assert(captured.ctx.addr==0x100&&captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET&&value==1);
+    assert(captured.ctx.addr==0x100&&captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK&&value==1);
     send(SET_LEVEL,0,32768);
     assert(captured.ctx.addr==0x101&&captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK&&value==0);
     send(SET_LEVEL,0,32768,1);
-    assert(captured.ctx.addr==0x100&&captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET&&value==32768);
+    assert(captured.ctx.addr==0x100&&captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK&&value==32768);
     send(SET_AUTO,1,1);assert(captured.ctx.addr==0x101&&value==1);
     send(SENSOR,2);assert(captured.ctx.addr==0x102&&value==0);
     send(SENSOR,3);assert(captured.ctx.addr==0x103&&value==0);

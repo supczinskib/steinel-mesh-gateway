@@ -24,7 +24,7 @@ for (const file of ['README.md', 'README_PL.md', 'README_DE.md', 'README_FR.md']
 }
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function boot(release) {
+async function boot(release, installedVersion = '1.9.2') {
   const errors = [], calls = [];
   const console = new VirtualConsole();
   console.on('jsdomError', error => errors.push(error));
@@ -36,7 +36,7 @@ async function boot(release) {
         calls.push({url, options});
         let data;
         if (url === '/steinel/status') data = {configured:true, enabled:true, mesh_ready:true,
-          gateway_version:'1.9.2', networks:[], local_address:'7000'};
+          gateway_version:installedVersion, networks:[], local_address:'7000'};
         else if (url === '/api/nodes') data = {nodes:[]};
         else if (url === api) data = release;
         else if (url === '/steinel/update') data = {message:'Update scheduled'};
@@ -85,5 +85,27 @@ async function boot(release) {
   assert.equal(t.document.getElementById('installAvailableUpdate').classList.contains('hidden'), true);
   assert.match(t.document.getElementById('otaStatus').textContent, /up to date/);
   t.dom.window.close();
-  console.log('Firmware updates: new repository, packaging contract, 1.9.2 → 2.0.0 request and invalid-asset rejection passed.');
+  for (const [installed, latest, offered] of [
+    ['2.0.1-rc.1', '2.0.0', false],
+    ['2.0.1-rc.1', '2.0.1', true],
+    ['2.0.1-rc.12', '2.0.1', true],
+    ['2.0.1-rc.1', '2.0.2', true],
+    ['2.0.1', '2.0.1', false],
+    ['2.0.2-rc.1', '2.0.1', false],
+  ]) {
+    const nextAsset = {...asset, name:`${assetPrefix}${latest}-ota.bin`,
+      browser_download_url:`${downloadPrefix}${latest}/${assetPrefix}${latest}-ota.bin`};
+    t = await boot({tag_name:`v${latest}`, assets:[nextAsset]}, installed);
+    const button = t.document.getElementById('installAvailableUpdate');
+    assert.equal(!button.classList.contains('hidden'), offered, `${installed} → ${latest}`);
+    if (offered) {
+      button.click(); await wait(20);
+      const update = t.calls.find(call => call.url === '/steinel/update');
+      assert.ok(update, `${installed} → ${latest}`);
+      assert.equal(update.options.body.get('version'), latest);
+      assert.equal(update.options.body.get('url'), nextAsset.browser_download_url);
+    } else assert.equal(t.calls.some(call => call.url === '/steinel/update'), false);
+    assert.equal(t.errors.length, 0); t.dom.window.close();
+  }
+  console.log('Firmware updates: repository, packaging, RC → stable, downgrade prevention and invalid assets passed.');
 })().catch(error => {console.error(error); process.exitCode = 1;});

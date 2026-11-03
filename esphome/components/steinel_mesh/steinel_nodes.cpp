@@ -18,13 +18,30 @@ enum Request : uint8_t { COMPOSITION, ON, LEVEL, AUTO, THRESHOLD, RUN, SENSOR,
                          SET_ON, SET_LEVEL, SET_AUTO, SET_THRESHOLD, SET_RUN,
                          DESCRIPTORS, SENSOR_PROPERTY, SET_MODE };
 constexpr uint32_t POLL_INTERVAL = 30000, STALE_INTERVAL = 180000;
+inline constexpr uint32_t OUTPUT_POLL_INTERVAL = 2000;
 constexpr uint32_t IDENTITY_INTERVAL = 6UL * 60UL * 60UL * 1000UL;
 constexpr uint16_t THRESHOLD_PROPERTY = 0x002B, RUN_PROPERTY = 0x003C;
 constexpr uint8_t POLL_STEPS = 6 + protocol::MAX_ELEMENTS * 5;
 inline constexpr uint8_t OUTPUT_VERIFY_ATTEMPTS = 5;
-inline constexpr uint32_t NIGHTMATIQ_STATE_TIMEOUT = 1200;
+inline constexpr uint32_t STATE_READ_TIMEOUT = 1200;
+inline constexpr uint8_t WRITE_BURST_LIMIT = 8;
+inline constexpr uint8_t OUTPUT_LIGHTNESS_READ = 1;
+constexpr bool output_read(uint8_t kind, uint8_t step) {
+  return kind == ON || (kind == LEVEL && step == OUTPUT_LIGHTNESS_READ);
+}
+inline bool output_lightness_supported(const protocol::Node &node, uint16_t functions) {
+  const int output = protocol::output_element(node);
+  return !node.nightmatiq && output >= 0 && (functions & protocol::F_BRIGHTNESS) &&
+      protocol::element_with(node, protocol::LIGHTNESS) == output;
+}
 constexpr bool is_write(uint8_t kind) {
   return (kind >= SET_ON && kind <= SET_RUN) || kind == SET_MODE;
+}
+constexpr bool output_control(uint8_t kind) {
+  return kind == SET_ON || kind == SET_LEVEL || kind == SET_AUTO || kind == SET_MODE;
+}
+constexpr bool supersedes_write(uint8_t newer, uint8_t older) {
+  return newer == older || (output_control(newer) && output_control(older));
 }
 constexpr size_t command_field(uint8_t kind) { return kind == SET_MODE ? 5 : kind - SET_ON; }
 constexpr uint16_t required_function(uint8_t kind) {
@@ -302,6 +319,9 @@ bool SteinelMesh::diagnostic_reply_(const esp_ble_mesh_client_common_param_t *pa
                                    uint32_t received, bool valid, uint16_t property) {
   if (params == nullptr || this->access_operation_.load() != AccessOperation::NODE ||
       !this->active_node_request_.diagnostic) return false;
+  // Selected nodes use the normal callback to update state and complete the read.
+  if (this->active_node_request_.node < this->catalog_.count &&
+      this->catalog_.nodes[this->active_node_request_.node].selected) return false;
   const bool expected_response = valid &&
       protocol::matching_reply(this->node_destination_.load(), this->access_opcode_.load(),
                                this->node_expected_status_.load(), 0,
@@ -319,8 +339,13 @@ bool SteinelMesh::next_diagnostic_request_(uint32_t now, NodeRequest &request) {
     if (!this->catalog_.nodes[i].selected ||
         !protocol::composition_allows(state.composition_checked, state.composition_matches) ||
         protocol::deadline_pending(now, state.retry_at)) continue;
-    for (uint32_t seen : state.value_seen)
-      if (seen != 0 && now - seen >= state.stale_after - 2 * POLL_INTERVAL) return false;
+    for (size_t field = 0; field < state.value_seen.size(); ++field) {
+      if (!(protocol::possible_functions(this->catalog_.nodes[i]) & (1U << field))) continue;
+      uint32_t refreshed = state.value_seen[field];
+      const uint32_t attempted = state.value_poll_at[field];
+      if (attempted != 0 && (refreshed == 0 || int32_t(attempted - refreshed) > 0)) refreshed = attempted;
+      if (refreshed != 0 && now - refreshed >= state.stale_after - 2 * POLL_INTERVAL) return false;
+    }
   }
   const auto &node = this->catalog_.nodes[session.node];
   constexpr uint8_t steps = 6 + protocol::MAX_ELEMENTS * 5;
@@ -354,6 +379,12 @@ bool SteinelMesh::next_diagnostic_request_(uint32_t now, NodeRequest &request) {
 }
 
 bool SteinelMesh::queue_node_command(uint16_t address, NodeCommand command, uint32_t value) {
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    const uint8_t bytes[] = {uint8_t(value), uint8_t(value >> 8), uint8_t(value >> 16)};
+    this->state_trace_.record(millis(), address, address, protocol::StateTrace::RECEIVED,
+        0, 0, 0, uint8_t(command), 0, 0, -1, -1, -1, -1, bytes, sizeof(bytes), 0, this->node_queue_count_);
+  }
   if (!this->catalog_valid_ || !this->mesh_ready_.load() || this->reboot_pending_.load()) return false;
   const uint8_t kinds[] = {SET_ON, SET_LEVEL, SET_AUTO, SET_THRESHOLD, SET_RUN, SET_MODE};
   const size_t command_index = size_t(command);
@@ -376,10 +407,22 @@ bool SteinelMesh::queue_node_command(uint16_t address, NodeCommand command, uint
     const int element = command == NodeCommand::ONOFF ? protocol::output_element(node) :
                         protocol::element_with(node, required_cap(kinds[command_index]));
     if (element < 0) return false;
+    // Repetitions must not restore an older output/LC intent after a new command.
+    for (size_t j = 0; j < this->node_queue_count_;) {
+      const auto &queued = this->node_queue_[j];
+      if (queued.node == i && queued.attempts != 0 &&
+          supersedes_write(kinds[command_index], queued.kind)) {
+        std::move(this->node_queue_.begin() + j + 1, this->node_queue_.begin() + this->node_queue_count_,
+                  this->node_queue_.begin() + j);
+        --this->node_queue_count_;
+      } else ++j;
+    }
     const auto record_command = [&](const NodeRequest &request) {
-      if (request.kind == SET_MODE) { state.controls.cancel(0); state.controls.cancel(2); }
-      else if (request.kind == SET_ON || request.kind == SET_LEVEL || request.kind == SET_AUTO)
+      if (output_control(request.kind)) {
+        for (size_t field : {size_t(0), size_t(1), size_t(2)})
+          if (field != command_index) state.controls.cancel(field);
         state.controls.cancel(5);
+      }
       state.controls.begin(command_index, value, millis()); state.dirty = true;
       if ((state.supported & protocol::F_MODE) &&
           (request.kind == SET_MODE || request.kind == SET_ON || request.kind == SET_LEVEL || request.kind == SET_AUTO))
@@ -387,7 +430,8 @@ bool SteinelMesh::queue_node_command(uint16_t address, NodeCommand command, uint
       const uint8_t bytes[] = {uint8_t(value), uint8_t(value >> 8), uint8_t(value >> 16)};
       this->state_trace_.record(millis(), node.address, node.address + element,
           protocol::StateTrace::QUEUED, 0, 0, 0, request.kind, request.step, request.tid,
-          state.on, state.automatic, state.on, state.automatic, bytes, sizeof(bytes));
+          state.on, state.automatic, state.on, state.automatic, bytes, sizeof(bytes), 0,
+          this->node_queue_count_, request.attempts);
     };
     // Coalesce an unsent slider command, but never overwrite an in-flight TID.
     for (size_t j = 0; j < this->node_queue_count_; ++j)
@@ -432,9 +476,8 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
   params.ctx.app_idx = this->config_.app_key_index;
   params.ctx.addr = node.address + request.element;
   params.ctx.send_ttl = 7;
-  params.msg_timeout = request.kind == COMPOSITION ? 4000 : 3000;
-  if (node.nightmatiq && (request.kind == ON || request.kind == AUTO))
-    params.msg_timeout = NIGHTMATIQ_STATE_TIMEOUT;
+  params.msg_timeout = request.kind == COMPOSITION ? 4000 :
+      is_write(request.kind) ? 3000 : STATE_READ_TIMEOUT;
   params.model = node_model_(request.kind);
   uint32_t status = 0;
   uint16_t property = 0;
@@ -465,15 +508,15 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
       status = ESP_BLE_MESH_MODEL_OP_COMPOSITION_DATA_STATUS;
       break;
     case ON: case SET_ON:
-      params.opcode = request.kind == ON ? ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET : ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET;
+      params.opcode = request.kind == ON ? ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET : ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK;
       generic_set.onoff_set.onoff = request.value; generic_set.onoff_set.tid = request.tid;
       status = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS; break;
     case LEVEL: case SET_LEVEL:
-      params.opcode = request.kind == LEVEL ? ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET : ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET;
+      params.opcode = request.kind == LEVEL ? ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_GET : ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK;
       light_set.lightness_set.lightness = request.value; light_set.lightness_set.tid = request.tid;
       status = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS; break;
     case AUTO: case SET_AUTO:
-      params.opcode = request.kind == AUTO ? ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_GET : ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET;
+      params.opcode = request.kind == AUTO ? ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_GET : ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK;
       light_set.lc_mode_set.mode = request.value;
       status = ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS; break;
     case DESCRIPTORS:
@@ -509,7 +552,7 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
       break;
     default:
       property = (request.kind == THRESHOLD || request.kind == SET_THRESHOLD) ? THRESHOLD_PROPERTY : RUN_PROPERTY;
-      params.opcode = is_write(request.kind) ? ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET : ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_GET;
+      params.opcode = is_write(request.kind) ? ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET_UNACK : ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_GET;
       light_get.lc_property_get.property_id = property;
       this->node_property_storage_ = {uint8_t(request.value), uint8_t(request.value >> 8), uint8_t(request.value >> 16)};
       this->node_property_buffer_.data = this->node_property_storage_.data();
@@ -526,7 +569,11 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
   this->node_destination_.store(params.ctx.addr);
   this->node_expected_status_.store(status);
   this->node_expected_property_.store(property);
-  if (!request.diagnostic && (request.kind == ON || request.kind == AUTO || is_write(request.kind))) {
+  if (output_read(request.kind, request.step)) {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    this->node_states_[request.node].value_poll_at[0] = millis();
+  }
+  {
     uint8_t bytes[3]{}; size_t length = 0;
     if (params.opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET ||
         params.opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK) {
@@ -544,7 +591,8 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
     const auto &state = this->node_states_[request.node];
     this->state_trace_.record(millis(), node.address, params.ctx.addr, protocol::StateTrace::SEND,
         params.opcode, params.opcode, 0, request.kind, request.step, request.tid,
-        state.on, state.automatic, state.on, state.automatic, bytes, length);
+        state.on, state.automatic, state.on, state.automatic, bytes, length, 0,
+        this->node_queue_count_, request.attempts, request.diagnostic ? 1 : 0, params.msg_timeout);
   }
   esp_err_t result;
   if (request.kind == COMPOSITION)
@@ -563,6 +611,14 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
     result = !is_write(request.kind) ? esp_ble_mesh_light_client_get_state(&params, &light_get) :
                                     esp_ble_mesh_light_client_set_state(&params, &light_set);
   const bool accepted = this->record_access_send_result_(AccessOperation::NODE, params.opcode, result);
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    const auto &state = this->node_states_[request.node];
+    this->state_trace_.record(millis(), node.address, params.ctx.addr, protocol::StateTrace::SDK_RESULT,
+        params.opcode, params.opcode, 0, request.kind, request.step, request.tid,
+        state.on, state.automatic, state.on, state.automatic, nullptr, 0, result,
+        this->node_queue_count_, request.attempts);
+  }
   if (!accepted && !request.diagnostic) {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     const auto &state = this->node_states_[request.node];
@@ -577,6 +633,8 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
   if (!accepted) this->finish_node_request_(false);
   else if (params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK ||
            params.opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK ||
+           params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK ||
+           params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET_UNACK ||
            params.opcode == ESP_BLE_MESH_MODEL_OP_SCENE_RECALL_UNACK) {
     // Complete only the send stage. No device state is inferred from SDK acceptance.
     this->finish_node_request_(true);
@@ -595,6 +653,8 @@ bool SteinelMesh::node_event_(const esp_ble_mesh_client_common_param_t *params, 
   if (params == nullptr || this->access_operation_.load() != AccessOperation::NODE) return false;
   // An authenticated diagnostic reply proves transport even for another property.
   if (success && this->active_node_request_.diagnostic &&
+      this->active_node_request_.node < this->catalog_.count &&
+      !this->catalog_.nodes[this->active_node_request_.node].selected &&
       protocol::matching_reply(this->node_destination_.load(), this->access_opcode_.load(),
                                this->node_expected_status_.load(), 0,
                                params->ctx.addr, params->opcode, received, 0, true)) {
@@ -632,7 +692,8 @@ bool SteinelMesh::node_generic_event_(esp_ble_mesh_generic_client_cb_event_t eve
                        param->status_cb.onoff_status.present_onoff <= 1;
   if (success) {
     const uint8_t value = param->status_cb.onoff_status.present_onoff;
-    this->record_diagnostic_(param->params->ctx.addr, protocol::DeviceDiagnostics::RESPONSE,
+    this->record_diagnostic_(param->params->ctx.addr, event == ESP_BLE_MESH_GENERIC_CLIENT_PUBLISH_EVT ?
+                            protocol::DeviceDiagnostics::PUBLICATION : protocol::DeviceDiagnostics::RESPONSE,
                             param->params->ctx.recv_op, 0, &value, 1);
   }
   if (this->diagnostic_reply_(param->params, param->params->ctx.recv_op, success)) return true;
@@ -655,7 +716,9 @@ bool SteinelMesh::node_generic_event_(esp_ble_mesh_generic_client_cb_event_t eve
       if (node.nightmatiq && (state.supported & protocol::F_AUTO) && protocol::element_with(node, protocol::SCENE) >= 0)
         state.supported |= protocol::F_MODE;
       state.value_seen[0] = millis();
+      state.output_failures = 0;
       state.last_seen = millis(); state.dirty = true;
+      state.failures = 0; state.retry_at = 0;
       this->mesh_rx_messages_.fetch_add(1);
       this->mesh_generic_rx_.fetch_add(1); this->record_mesh_rssi_(param->params->ctx);
     }
@@ -707,7 +770,8 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
     } else if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_STATUS) {
       std::memcpy(bytes, param->status_cb.lc_property_status.property_value->data, 3); length = 3;
     }
-    if (length) this->record_diagnostic_(param->params->ctx.addr, protocol::DeviceDiagnostics::RESPONSE,
+    if (length) this->record_diagnostic_(param->params->ctx.addr, event == ESP_BLE_MESH_LIGHT_CLIENT_PUBLISH_EVT ?
+                                       protocol::DeviceDiagnostics::PUBLICATION : protocol::DeviceDiagnostics::RESPONSE,
                                        received, property, bytes, length);
   }
   if (this->diagnostic_reply_(param->params, received, valid, property)) return true;
@@ -735,6 +799,12 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
       state.brightness_known = true;
       state.supported |= protocol::F_BRIGHTNESS;
       state.value_seen[1] = millis();
+      if (!node.nightmatiq && protocol::output_element(node) == element) {
+        state.on = state.brightness != 0;
+        state.supported |= protocol::F_OUTPUT;
+        state.value_seen[0] = millis();
+        state.output_failures = 0;
+      }
     } else if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS) {
       const auto value = param->status_cb.lc_mode_status.mode;
       if (state.automatic != value)
@@ -754,6 +824,7 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
       state.on = value;
       state.supported |= protocol::F_OUTPUT;
       state.value_seen[0] = millis();
+      state.output_failures = 0;
     }
     else if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_STATUS) {
       const uint32_t value = protocol::le24(param->status_cb.lc_property_status.property_value->data);
@@ -766,10 +837,15 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
       }
       else return true;
     } else return true;
-    if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS ||
+    if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS ||
+        received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS ||
         received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_LIGHT_ONOFF_STATUS) {
-      uint8_t bytes[3]{}; size_t length = 1;
-      if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS) bytes[0] = param->status_cb.lc_mode_status.mode;
+      uint8_t bytes[4]{}; size_t length = 1;
+      if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS) {
+        const auto &status = param->status_cb.lightness_status;
+        bytes[0] = status.present_lightness; bytes[1] = status.present_lightness >> 8; length = 2;
+        if (status.op_en) { bytes[2] = status.target_lightness; bytes[3] = status.target_lightness >> 8; length = 4; }
+      } else if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS) bytes[0] = param->status_cb.lc_mode_status.mode;
       else {
         const auto &status = param->status_cb.lc_light_onoff_status;
         bytes[0] = status.present_light_onoff;
@@ -780,6 +856,7 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
           before_on, before_auto, state.on, state.automatic, bytes, length);
     }
     state.last_seen = millis(); state.dirty = true; this->mesh_rx_messages_.fetch_add(1);
+    state.failures = 0; state.retry_at = 0;
     this->record_mesh_rssi_(param->params->ctx);
     uint32_t confirmed = 0;
     if (received == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS) {
@@ -1020,8 +1097,8 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
       entities->model->publish_state(protocol::product_name(state.company, state.product));
     }
     if (entities->output) {
-      const int on = state.controls.has(0) ? state.controls.values[0] : state.on;
-      if (state.was_available && on >= 0) entities->output->publish_state(on ? "On" : "Off");
+      // HA automations use Output as a condition; pending intent is not device state.
+      if (state.was_available && state.on >= 0) entities->output->publish_state(state.on ? "On" : "Off");
       else entities->output->invalidate_state();
     }
     if (entities->automatic) {
@@ -1066,6 +1143,23 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
   if (this->node_completion_pending_.exchange(false)) {
     const bool success = this->node_completion_success_.load();
     auto request = this->active_node_request_;
+    {
+      std::lock_guard<std::mutex> lock(this->node_mutex_);
+      const auto &node = this->catalog_.nodes[request.node];
+      const auto &state = this->node_states_[request.node];
+      this->state_trace_.record(now, node.address, this->node_destination_.load(), protocol::StateTrace::COMPLETED,
+          0, 0, 0, request.kind, request.step, request.tid,
+          state.on, state.automatic, state.on, state.automatic, nullptr, 0, success ? 0 : -1,
+          this->node_queue_count_, request.attempts);
+    }
+    if (output_read(request.kind, request.step)) {
+      std::lock_guard<std::mutex> lock(this->node_mutex_);
+      auto &state = this->node_states_[request.node];
+      state.output_failures = success ? 0 : std::min<unsigned>(state.output_failures + 1, 6);
+      state.output_lightness_next = !success && request.kind == ON;
+      if (success && state.value_poll_at[0] != 0)
+        state.output_rtt_ms = std::min<uint32_t>(now - state.value_poll_at[0], POLL_INTERVAL);
+    }
     if (request.diagnostic) {
       if (!success) this->record_diagnostic_(this->node_destination_.load(), protocol::DeviceDiagnostics::TIMEOUT,
                                             this->node_expected_status_.load());
@@ -1081,8 +1175,8 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
           request.kind == COMPOSITION;
       const bool lc_prepare = (request.kind == SET_MODE && request.step < 2) ||
           ((request.kind == SET_ON || request.kind == SET_LEVEL) && request.step == 0);
-      if (success && !lc_prepare) state.failures = 0;
-      else if (!optional) state.failures = std::min<unsigned>(state.failures + 1, 8);
+      if (success && !is_write(request.kind)) state.failures = 0;
+      else if (!success && !optional) state.failures = std::min<unsigned>(state.failures + 1, 8);
       if (success && !lc_prepare) state.retry_at = 0;
       if (!is_write(request.kind) && !optional) {
         // Probe each model before declaring the node offline. A missing model
@@ -1095,6 +1189,10 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
           this->node_queue_.begin() + this->node_queue_count_, [&](const auto &item) {
             return item.node == request.node && item.kind == request.kind;
           });
+      const bool superseded = std::any_of(this->node_queue_.begin(),
+          this->node_queue_.begin() + this->node_queue_count_, [&](const auto &item) {
+            return item.node == request.node && supersedes_write(item.kind, request.kind);
+          });
       const bool continuation = (request.kind == SET_MODE && request.step < 3) ||
           ((request.kind == SET_ON || request.kind == SET_LEVEL) && request.step == 0);
       if (success && !newer_queued && continuation && this->node_queue_count_ < NODE_QUEUE_SIZE) {
@@ -1103,14 +1201,18 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
                            this->node_queue_.begin() + this->node_queue_count_ + 1);
         this->node_queue_[0] = request; ++this->node_queue_count_;
       }
-      if (is_write(request.kind) && !newer_queued &&
+      const bool repeat = success && !continuation && !superseded && is_write(request.kind) &&
+          request.kind != SET_MODE && request.attempts == 0 && this->node_queue_count_ < NODE_QUEUE_SIZE;
+      if (repeat) {
+        ++request.attempts;
+        this->node_queue_[this->node_queue_count_++] = request;
+      }
+      if (is_write(request.kind) && !newer_queued && !repeat &&
           ((success && !continuation) || (!success && request.attempts != 0))) {
-        // The device may have applied a write whose acknowledgement was lost.
+        // SDK submission does not confirm device state; schedule readback.
         state.poll_step = 0; state.poll_at = now + 300; state.retry_at = 0; state.force_poll = true;
         const size_t control_field = command_field(request.kind);
-        const uint32_t confirmation_at = success && request.kind != SET_MODE ?
-            state.value_seen[control_field] : now;
-        state.controls.ready(control_field, confirmation_at);
+        state.controls.ready(control_field, now);
         uint8_t fields = request.kind == SET_MODE ? 5 :
             uint8_t(1U << command_field(request.kind));
         if (state.supported & protocol::F_OUTPUT) fields |= 1;
@@ -1129,8 +1231,8 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
         if (mode_write && state.mode.writing && !mode_write_queued) state.mode.finish_write(now);
       }
       if (request.verification && request.kind >= ON && request.kind <= RUN) {
-        const size_t field = request.kind - ON;
-        const bool output_unsettled = request.kind == ON &&
+        const size_t field = output_read(request.kind, request.step) ? 0 : request.kind - ON;
+        const bool output_unsettled = field == 0 &&
             ((state.controls.has(0) && state.on != int(state.controls.values[0])) ||
              (state.controls.has(5) && state.controls.values[5] != 0 &&
               state.on != int(state.controls.values[5] == 1)));
@@ -1141,13 +1243,11 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
           if (field == 0) state.verify_next = 0;
         }
       }
-      if (!success && !newer_queued &&
+      if (!success && !superseded &&
           is_write(request.kind) && request.attempts == 0 &&
           this->node_queue_count_ < NODE_QUEUE_SIZE) {
         request.attempts++;
-        std::move_backward(this->node_queue_.begin(), this->node_queue_.begin() + this->node_queue_count_,
-                           this->node_queue_.begin() + this->node_queue_count_ + 1);
-        this->node_queue_[0] = request; ++this->node_queue_count_;
+        this->node_queue_[this->node_queue_count_++] = request;
       }
     }
     }
@@ -1157,17 +1257,54 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
       this->access_operation_.load() != AccessOperation::NONE ||
       this->composition_query_in_flight_.load() || this->control_kind_ != ControlKind::NONE ||
       this->control_request_pending_() || this->poll_stage_ != 0 ||
-      protocol::deadline_pending(now, this->node_next_request_at_)) return;
-  NodeRequest request{};
-  bool queued = false;
-  bool mode_continuation;
+      protocol::deadline_pending(now, this->node_next_request_at_)) {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    if (this->state_trace_.active(now) && this->node_queue_count_ != 0) {
+      using Trace = protocol::StateTrace;
+      const uint16_t flags = (!this->mesh_ready_.load() ? Trace::NOT_READY : 0) |
+          (this->reboot_pending_.load() ? Trace::RESTARTING : 0) |
+          (this->node_completion_pending_.load() ? Trace::COMPLETION_PENDING : 0) |
+          (this->access_operation_.load() != AccessOperation::NONE ? Trace::ACCESS_BUSY : 0) |
+          (this->composition_query_in_flight_.load() ? Trace::COMPOSITION_BUSY : 0) |
+          (this->control_kind_ != ControlKind::NONE ? Trace::CONTROL_BUSY : 0) |
+          (this->control_request_pending_() ? Trace::CONTROL_PENDING : 0) |
+          (this->poll_stage_ != 0 ? Trace::LEGACY_POLL : 0) |
+          (protocol::deadline_pending(now, this->node_next_request_at_) ? Trace::REQUEST_GAP : 0);
+      this->state_trace_.wait(now, this->node_queue_count_, flags,
+          flags & Trace::ACCESS_BUSY ? this->node_destination_.load() : 0,
+          flags & Trace::ACCESS_BUSY ? this->access_opcode_.load() : 0,
+          protocol::deadline_pending(now, this->node_next_request_at_) ?
+          this->node_next_request_at_ - now : 0);
+    }
+    return;
+  }
   {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
-    mode_continuation = this->node_queue_count_ != 0 &&
-        this->node_queue_[0].kind == SET_MODE && this->node_queue_[0].step != 0;
+    this->state_trace_.wait(now, this->node_queue_count_, 0, 0, 0, 0);
   }
-  // Keep duplicated mode actions inside the Mesh transaction window.
-  if (this->node_write_burst_ >= 2 && !mode_continuation) {
+  NodeRequest request{};
+  bool queued = false;
+  bool continuation;
+  bool repetitions_only;
+  uint8_t burst_limit;
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    const auto &next = this->node_queue_[0];
+    continuation = this->node_queue_count_ != 0 && next.step != 0 && next.attempts == 0 &&
+        (next.kind == SET_MODE || ((next.kind == SET_ON || next.kind == SET_LEVEL) &&
+          protocol::element_with(this->catalog_.nodes[next.node], protocol::LC) >= 0 &&
+          (this->node_states_[next.node].supported & protocol::F_AUTO)));
+    repetitions_only = this->node_queue_count_ != 0 &&
+        std::all_of(this->node_queue_.begin(), this->node_queue_.begin() + this->node_queue_count_,
+                    [](const auto &item) { return item.attempts != 0; });
+    const auto selected = std::count_if(this->catalog_.nodes.begin(),
+        this->catalog_.nodes.begin() + this->catalog_.count, [](const auto &node) { return node.selected; });
+    burst_limit = this->node_queue_count_ > 1 ?
+        std::min<unsigned>(WRITE_BURST_LIMIT, 32 / std::max<unsigned>(selected, 1)) : 2;
+  }
+  // Finish bounded repetitions within the transaction window; sustained fresh
+  // commands still yield polling slots through the burst limit.
+  if (this->node_write_burst_ >= burst_limit && !continuation && !repetitions_only) {
     this->node_write_burst_ = 0;
     this->poll_nodes_(now);
     if (this->access_operation_.load() != AccessOperation::NONE || this->node_completion_pending_.load() ||
@@ -1176,8 +1313,12 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
   {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     if (this->node_queue_count_ != 0) {
-      request = this->node_queue_[0];
-      std::move(this->node_queue_.begin() + 1, this->node_queue_.begin() + this->node_queue_count_, this->node_queue_.begin());
+      size_t index = 0;
+      while (index < this->node_queue_count_ && this->node_queue_[index].attempts != 0) ++index;
+      if (index == this->node_queue_count_) index = 0;
+      request = this->node_queue_[index];
+      std::move(this->node_queue_.begin() + index + 1, this->node_queue_.begin() + this->node_queue_count_,
+                this->node_queue_.begin() + index);
       --this->node_queue_count_; queued = true;
     }
   }
@@ -1217,7 +1358,9 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
     for (size_t i = 0; i < this->catalog_.count; ++i) verifying |= this->node_states_[i].verify_fields != 0;
   }
   if (verifying) { this->poll_nodes_(now); return; }
+  if (this->poll_priority_(now)) return;
   if (this->next_diagnostic_request_(now, request)) {
+    this->node_priority_burst_ = 0;
     this->send_node_request_(request); this->node_next_request_at_ = now + 200; return;
   }
   this->poll_nodes_(now);
@@ -1245,27 +1388,6 @@ void SteinelMesh::poll_nodes_(uint32_t now) {
   { std::lock_guard<std::mutex> lock(this->node_mutex_); now = millis(); diagnosing = this->device_diagnostics_.active(now); }
   if (!diagnosing && discovered && this->sync_node_functions_() && this->reboot_pending_.load()) return;
   if (this->catalog_.count == 0) return;
-  const auto dispatch = [&](const NodeRequest &request) {
-    {
-      std::lock_guard<std::mutex> lock(this->node_mutex_);
-      now = millis();
-      auto &state = this->node_states_[request.node];
-      const auto &node = this->catalog_.nodes[request.node];
-      if (request.kind >= ON && request.kind <= RUN) state.value_poll_at[request.kind - ON] = now;
-      if (request.kind == COMPOSITION)
-        state.composition_at = now + (state.composition_checked ? IDENTITY_INTERVAL : 60000);
-      if (request.kind == SENSOR || (request.kind == SENSOR_PROPERTY && request.value == 0x004E)) {
-        const int fallback = protocol::element_with(node, protocol::SENSOR);
-        if (request.element == (state.lux_element < node.element_count ? state.lux_element : fallback))
-          state.value_poll_at[5] = now;
-        if (request.kind == SENSOR &&
-            request.element == (state.motion_element < node.element_count ? state.motion_element : fallback))
-          state.value_poll_at[6] = now;
-      }
-    }
-    this->send_node_request_(request);
-    this->node_next_request_at_ = now + 200;
-  };
   NodeRequest verification{};
   bool verification_found = false;
   if (this->node_priority_burst_ < 8) {
@@ -1279,72 +1401,23 @@ void SteinelMesh::poll_nodes_(uint32_t now) {
       for (size_t offset = 0; offset < 5; ++offset) {
         const uint8_t field = (state.verify_next + offset) % 5;
         if (!(state.verify_fields & (1U << field))) continue;
-        const uint8_t kind = ON + field;
+        const bool lightness = field == 0 && (state.verify_attempts[0] & 1U) &&
+            output_lightness_supported(node, state.supported);
+        const uint8_t kind = lightness ? uint8_t(LEVEL) : uint8_t(ON + field);
         const int element = field == 0 ? protocol::output_element(node) : protocol::element_with(node, required_cap(kind));
         state.verify_fields &= ~(1U << field); state.verify_next = (field + 1) % 5;
         if (!(protocol::possible_functions(node) & (1U << field))) continue;
         if (element < 0) continue;
         verification = NodeRequest{uint8_t(index), uint8_t(element), kind, 0, 0, 0};
+        verification.step = lightness ? OUTPUT_LIGHTNESS_READ : 0;
         verification.verification = true; verification_found = true;
         this->node_poll_index_ = (index + 1) % this->catalog_.count;
         break;
       }
     }
   }
-  if (verification_found) { ++this->node_priority_burst_; dispatch(verification); return; }
-  // Refresh the oldest known value before background probes can make it expire.
-  NodeRequest priority{};
-  bool priority_found = false, optional_timeout = false;
-  uint32_t oldest = STALE_INTERVAL - POLL_INTERVAL;
-  {
-    std::lock_guard<std::mutex> lock(this->node_mutex_);
-    now = millis();
-    for (size_t i = 0; i < this->catalog_.count; ++i) {
-      const auto &state = this->node_states_[i];
-      if (!this->catalog_.nodes[i].selected || !protocol::composition_allows(state.composition_checked, state.composition_matches) ||
-          protocol::deadline_pending(now, state.retry_at)) continue;
-      for (size_t field : {size_t(3), size_t(4)})
-        if (state.value_seen[field] != 0 && state.value_poll_at[field] != 0 &&
-            static_cast<int32_t>(state.value_poll_at[field] - state.value_seen[field]) > 0) optional_timeout = true;
-    }
-    // Leave more time for working values when previously supported properties time out.
-    if (optional_timeout) oldest = STALE_INTERVAL - 2 * POLL_INTERVAL;
-    for (size_t i = 0; i < this->catalog_.count; ++i) {
-      const auto &node = this->catalog_.nodes[i];
-      const auto &state = this->node_states_[i];
-      if (!node.selected || !protocol::composition_allows(state.composition_checked, state.composition_matches) ||
-          protocol::deadline_pending(now, state.retry_at)) continue;
-      for (size_t field = 0; field < state.value_seen.size(); ++field) {
-        if (!(protocol::possible_functions(node) & (1U << field))) continue;
-        if ((state.value_seen[field] == 0 && !(state.supported & (1U << field))) ||
-            (state.value_poll_at[field] != 0 && now - state.value_poll_at[field] < POLL_INTERVAL)) continue;
-        if ((field == 3 || field == 4) && state.value_poll_at[field] != 0 &&
-            static_cast<int32_t>(state.value_poll_at[field] - state.value_seen[field]) > 0 &&
-            now - state.value_poll_at[field] <
-                ((state.supported & (1U << field)) ? 2 * POLL_INTERVAL : STALE_INTERVAL)) continue;
-        uint32_t refreshed_at = state.value_seen[field] ? state.value_seen[field] : state.value_poll_at[field];
-        if ((field == 3 || field == 4) && state.value_poll_at[field] != 0 &&
-            static_cast<int32_t>(state.value_poll_at[field] - refreshed_at) > 0)
-          refreshed_at = state.value_poll_at[field];
-        const uint32_t elapsed = now - refreshed_at;
-        const uint32_t age = optional_timeout && (field == 3 || field == 4) ?
-            elapsed - std::min<uint32_t>(elapsed, POLL_INTERVAL) : elapsed;
-        if (age < oldest) continue;
-        const uint8_t kind = field < 5 ? uint8_t(ON + field) :
-            field == 5 && state.lux_property ? uint8_t(SENSOR_PROPERTY) : uint8_t(SENSOR);
-        int element = field == 0 ? protocol::output_element(node) : protocol::element_with(node, required_cap(kind));
-        if (field == 5 && state.lux_element < node.element_count) element = state.lux_element;
-        if (field == 6 && state.motion_element < node.element_count) element = state.motion_element;
-        if (element < 0) continue;
-        priority = NodeRequest{uint8_t(i), uint8_t(element), kind, 0, 0,
-                               kind == SENSOR_PROPERTY ? 0x004EU : 0U};
-        priority_found = true; oldest = age;
-      }
-    }
-  }
-  if (priority_found && this->node_priority_burst_ < 8) {
-    ++this->node_priority_burst_; dispatch(priority); return;
-  }
+  if (verification_found) { ++this->node_priority_burst_; this->dispatch_node_request_(verification, now); return; }
+  if (this->poll_priority_(now)) return;
   for (size_t attempts = 0; attempts < protocol::MAX_NODES * POLL_STEPS; ++attempts) {
     const uint8_t index = this->node_poll_index_++ % this->catalog_.count;
     this->node_poll_index_ %= this->catalog_.count;
@@ -1421,6 +1494,11 @@ void SteinelMesh::poll_nodes_(uint32_t now) {
     } else element = kind == COMPOSITION ? 0 : kind == ON ? protocol::output_element(node) :
                     protocol::element_with(node, required_cap(kind));
     if (element < 0) continue;
+    if (kind == ON) {
+      std::lock_guard<std::mutex> lock(this->node_mutex_);
+      const auto &state = this->node_states_[index];
+      if (state.value_seen[0] != 0 && millis() - state.value_seen[0] < OUTPUT_POLL_INTERVAL) continue;
+    }
     if (kind == THRESHOLD || kind == RUN) {
       std::lock_guard<std::mutex> lock(this->node_mutex_);
       now = millis();
@@ -1439,9 +1517,137 @@ void SteinelMesh::poll_nodes_(uint32_t now) {
       }
     }
     this->node_priority_burst_ = 0;
-    dispatch(NodeRequest{index, uint8_t(element), kind, 0, 0, value}); return;
+    this->dispatch_node_request_(NodeRequest{index, uint8_t(element), kind, 0, 0, value}, now); return;
   }
-  if (priority_found) { this->node_priority_burst_ = 0; dispatch(priority); return; }
+  this->node_priority_burst_ = 0;
   this->node_poll_at_ = now + 20;
+}
+
+void SteinelMesh::dispatch_node_request_(const NodeRequest &request, uint32_t now) {
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    now = millis();
+    auto &state = this->node_states_[request.node];
+    const auto &node = this->catalog_.nodes[request.node];
+    if (request.kind >= ON && request.kind <= RUN) state.value_poll_at[request.kind - ON] = now;
+    if (request.kind == COMPOSITION)
+      state.composition_at = now + (state.composition_checked ? IDENTITY_INTERVAL : 60000);
+    if (request.kind == SENSOR || (request.kind == SENSOR_PROPERTY && request.value == 0x004E)) {
+      const int fallback = protocol::element_with(node, protocol::SENSOR);
+      if (request.element == (state.lux_element < node.element_count ? state.lux_element : fallback))
+        state.value_poll_at[5] = now;
+      if (request.kind == SENSOR &&
+          request.element == (state.motion_element < node.element_count ? state.motion_element : fallback))
+        state.value_poll_at[6] = now;
+    }
+  }
+  this->send_node_request_(request);
+  this->node_next_request_at_ = now + 200;
+}
+
+bool SteinelMesh::poll_priority_(uint32_t now) {
+  if (this->node_priority_burst_ >= 8) return false;
+  NodeRequest request{};
+  bool found = false;
+  uint32_t oldest = 0;
+  {
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    now = millis();
+    size_t outputs = 0, selected = 0, fields = 0;
+    uint32_t round_trip = 0;
+    bool discovering = false;
+    for (size_t i = 0; i < this->catalog_.count; ++i) {
+      if (!this->catalog_.nodes[i].selected) continue;
+      const auto &state = this->node_states_[i];
+      ++selected;
+      discovering |= !state.discovery_complete &&
+          !protocol::deadline_pending(now, state.retry_at) &&
+          protocol::composition_allows(state.composition_checked, state.composition_matches);
+      if (protocol::output_element(this->catalog_.nodes[i]) >= 0) ++outputs;
+      round_trip = std::max<uint32_t>(round_trip, state.output_rtt_ms);
+      for (size_t field = 0; field < state.value_seen.size(); ++field)
+        if (state.value_seen[field] || (state.supported & (1U << field))) ++fields;
+    }
+    // Slow round trips consume the shared transaction slot. Scale background
+    // output reads to leave room for the remaining confirmed values.
+    const uint32_t interval = std::max({OUTPUT_POLL_INTERVAL, uint32_t(outputs) * 500,
+        uint32_t(fields) * (round_trip > 200 ? round_trip + 200 : 0)});
+    if (selected <= 4 || !discovering) {
+      for (size_t offset = 0; offset < this->catalog_.count; ++offset) {
+        const size_t index = (this->node_poll_index_ + offset) % this->catalog_.count;
+        const auto &node = this->catalog_.nodes[index];
+        const auto &state = this->node_states_[index];
+        if (!node.selected || state.last_seen == 0 || state.mode.writing ||
+            (!(state.supported & protocol::F_OUTPUT) && state.value_seen[0] == 0) ||
+            protocol::deadline_pending(now, state.retry_at) ||
+            !protocol::composition_allows(state.composition_checked, state.composition_matches)) continue;
+        const int element = protocol::output_element(node);
+        if (element < 0) continue;
+        const uint32_t seen = state.value_seen[0], attempted = state.value_poll_at[0];
+        const bool unanswered = attempted != 0 && (seen == 0 || int32_t(attempted - seen) > 0);
+        const uint32_t age = seen ? now - seen : now;
+        const uint32_t retry_interval = std::min<uint32_t>(POLL_INTERVAL,
+            STATE_READ_TIMEOUT << (state.output_failures ? state.output_failures - 1 : 0));
+        if ((unanswered ? now - attempted < retry_interval : age < interval) ||
+            (found && age <= oldest)) continue;
+        // Keep the usual read after an isolated miss; alternate after repeated failures.
+        const bool lightness = state.output_failures >= 2 && state.output_lightness_next &&
+            output_lightness_supported(node, state.supported);
+        request = NodeRequest{uint8_t(index), uint8_t(element), lightness ? uint8_t(LEVEL) : uint8_t(ON), 0, 0, 0};
+        request.step = lightness ? OUTPUT_LIGHTNESS_READ : 0;
+        found = true; oldest = age;
+      }
+    }
+    if (!found || round_trip > 200) {
+      // A missing optional reply cannot globally stop output polling. Retry
+      // aging values independently, subject to each property's backoff.
+      bool optional_timeout = false;
+      for (size_t i = 0; i < this->catalog_.count; ++i) {
+        const auto &state = this->node_states_[i];
+        if (!this->catalog_.nodes[i].selected || !protocol::composition_allows(state.composition_checked, state.composition_matches) ||
+            protocol::deadline_pending(now, state.retry_at)) continue;
+        for (size_t field : {size_t(3), size_t(4)})
+          if (state.value_seen[field] != 0 && state.value_poll_at[field] != 0 &&
+              static_cast<int32_t>(state.value_poll_at[field] - state.value_seen[field]) > 0) optional_timeout = true;
+      }
+      oldest = STALE_INTERVAL - (optional_timeout ? 2 : 1) * POLL_INTERVAL;
+      for (size_t i = 0; i < this->catalog_.count; ++i) {
+        const auto &node = this->catalog_.nodes[i];
+        const auto &state = this->node_states_[i];
+        if (!node.selected || !protocol::composition_allows(state.composition_checked, state.composition_matches) ||
+            protocol::deadline_pending(now, state.retry_at)) continue;
+        for (size_t field = 0; field < state.value_seen.size(); ++field) {
+          if (!(protocol::possible_functions(node) & (1U << field))) continue;
+          if ((state.value_seen[field] == 0 && !(state.supported & (1U << field))) ||
+              (state.value_poll_at[field] != 0 && now - state.value_poll_at[field] < POLL_INTERVAL)) continue;
+          if ((field == 3 || field == 4) && state.value_poll_at[field] != 0 &&
+              static_cast<int32_t>(state.value_poll_at[field] - state.value_seen[field]) > 0 &&
+              now - state.value_poll_at[field] <
+                  ((state.supported & (1U << field)) ? 2 * POLL_INTERVAL : STALE_INTERVAL)) continue;
+          uint32_t refreshed_at = state.value_seen[field] ? state.value_seen[field] : state.value_poll_at[field];
+          if ((field == 3 || field == 4) && state.value_poll_at[field] != 0 &&
+              static_cast<int32_t>(state.value_poll_at[field] - refreshed_at) > 0)
+            refreshed_at = state.value_poll_at[field];
+          const uint32_t elapsed = now - refreshed_at;
+          const uint32_t age = optional_timeout && (field == 3 || field == 4) ?
+              elapsed - std::min<uint32_t>(elapsed, POLL_INTERVAL) : elapsed;
+          if (age < oldest) continue;
+          const uint8_t kind = field < 5 ? uint8_t(ON + field) :
+              field == 5 && state.lux_property ? uint8_t(SENSOR_PROPERTY) : uint8_t(SENSOR);
+          int element = field == 0 ? protocol::output_element(node) : protocol::element_with(node, required_cap(kind));
+          if (field == 5 && state.lux_element < node.element_count) element = state.lux_element;
+          if (field == 6 && state.motion_element < node.element_count) element = state.motion_element;
+          if (element < 0) continue;
+          request = NodeRequest{uint8_t(i), uint8_t(element), kind, 0, 0,
+                               kind == SENSOR_PROPERTY ? 0x004EU : 0U};
+          found = true; oldest = age;
+        }
+      }
+    }
+    if (found) ++this->node_priority_burst_;
+  }
+  if (!found) return false;
+  this->dispatch_node_request_(request, now);
+  return true;
 }
 }  // namespace esphome::steinel_mesh

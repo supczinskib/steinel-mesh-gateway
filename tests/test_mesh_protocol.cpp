@@ -7,6 +7,30 @@ using namespace esphome::steinel_mesh::protocol;
 
 int main() {
   {
+    FirmwareVersion version{};
+    assert(firmware_version("2.0.1-rc.1", 10, version));
+    assert((version.core == std::array<uint16_t,3>{2,0,1}) && version.candidate == 1);
+    for (const char *text : {"0.0.0", "2.0.0", "2.0.1-rc.12", "65535.65535.65535"})
+      assert(firmware_version(text, std::strlen(text), version));
+    for (const char *text : {"", "v2.0.1", " 2.0.1", "+2.0.1", "2.0", "2.0.1 ", "02.0.1",
+                             "2.0.01", "2.0.1-rc.0", "2.0.1-rc.01", "2.0.1-rc.",
+                             "2.0.1-beta.1", "2.0.1-rc.1x", "2.0.1-rc.65536", "65536.0.1",
+                             "2.0.1+build", "2.0.1-rc.1.2", "2.0.1\n"})
+      assert(!firmware_version(text, std::strlen(text), version));
+    assert(!firmware_version(nullptr, 5, version));
+    const char embedded[]={'2','.','0','.','1','\0','x'};
+    assert(!firmware_version(embedded,sizeof(embedded),version));
+    const auto newer=[](const char *target,const char *current) {
+      return newer_stable_firmware(target,std::strlen(target),current,std::strlen(current));
+    };
+    assert(newer("2.0.1","2.0.1-rc.1") && newer("2.0.1","2.0.1-rc.12"));
+    assert(newer("2.0.2","2.0.1-rc.1") && newer("2.1.0","2.0.1-rc.1"));
+    assert(newer("2.0.0","1.9.2") && newer("2.0.1","2.0.0"));
+    assert(!newer("2.0.0","2.0.1-rc.1") && !newer("2.0.1","2.0.1"));
+    assert(!newer("2.0.1","2.0.2-rc.1") && !newer("2.0.1-rc.2","2.0.1-rc.1"));
+    assert(!newer("2.0.2","invalid") && !newer("invalid","2.0.1-rc.1"));
+  }
+  {
     esphome::steinel_mesh::protocol::PendingControls controls;
     controls.begin(5,0,1000);
     assert(controls.has(5) && !controls.observe(5,0,2000,2000));
@@ -27,28 +51,47 @@ int main() {
   }
   StateTrace trace;
   uint8_t value=1;
+  trace.record(0,2,3,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,1,1,1,&value,1);
+  assert(trace.count==0);
+  trace.start(0,1);
   for (uint32_t i=0; i<40; ++i)
     trace.record(i,2,3,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,1,1,1,&value,1);
-  assert(trace.count==32 && trace.entry(0).at==8 && !trace.captured);
+  assert(trace.count==32 && trace.entry(0).at==8 && trace.entry(0).sequence==9 && trace.running);
   value=0;
   trace.record(40,2,3,StateTrace::SEND,0x8293,0x8293,0,14,0,9,1,1,1,1,&value,1);
-  assert(!trace.captured);
+  assert(trace.running);
   trace.record(41,2,3,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,1,1,0,&value,1);
-  assert(trace.captured && !trace.frozen && trace.incident_at==41 && trace.remaining==16);
+  assert(trace.running && trace.sequence==42);
   trace.record(42,5,6,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,1,1,0,&value,1);
-  assert(trace.remaining==16);
+  assert(trace.entry(trace.count-1).node==5 && trace.sequence==43);
   for (uint32_t i=0; i<16; ++i)
     trace.record(43+i,2,3,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,0,1,1,&value,1);
-  assert(trace.frozen && trace.entry(15).at==41 && trace.entry(31).at==58);
+  assert(trace.running && trace.entry(31).at==58);
+  trace.stop(59);
   const auto sequence=trace.sequence;
   trace.record(59,2,3,StateTrace::RESPONSE,0x8294,0x8291,0,3,0,0,1,1,1,0,&value,1);
   assert(trace.sequence==sequence);
-  trace.clear(); assert(trace.count==0 && !trace.frozen && !trace.captured);
+  trace.clear(); assert(trace.count==0 && !trace.running && trace.id==0);
+  trace.start(0xFFFFFFF0,2);
+  trace.record(10,5,6,StateTrace::SEND,0x8202,0x8202,0,7,1,9,0,1,0,1,&value,1);
+  assert(trace.entry(0).at-trace.started_at==26);
+  assert(trace.active(0xFFFFFFF0+179999U));
+  assert(!trace.active(0xFFFFFFF0+180000U) && trace.expired);
+  assert(trace.stopped_at-trace.started_at==StateTrace::DURATION_MS);
+  trace.start(1000,3);
+  trace.wait(1000,3,StateTrace::ACCESS_BUSY,5,0x8201,0);
+  trace.wait(2000,3,StateTrace::ACCESS_BUSY,5,0x8201,0);
+  assert(trace.count==1);
+  trace.wait(2200,3,0,0,0,0);
+  assert(trace.count==2 && trace.entry(0).flags==StateTrace::ACCESS_BUSY && trace.entry(1).flags==0);
+  std::printf("Command trace: %zu B fixed buffer, disabled by default, all-node streaming and bounded lifetime passed\n",sizeof(trace));
   assert(std::strcmp(product_name(0x0563, 0x1B1B), "L 830 SC") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1E74), "L 820 SC") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1DCE), "NightmatIQ Plus") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1DE0), "IS 180") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1E79), "L 810 SC") == 0);
+  assert(std::strcmp(product_name(0x0563, 0x1E7E), "L 840 SC") == 0);
+  assert(std::strcmp(product_name(0x0563, 0x1EBA), "L 840 C") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1EBD), "L 810 C") == 0);
   assert(std::strcmp(product_name(0x0563, 0x1F27), "L 42 SC") == 0);
   assert(!*product_name(0, 0x1DE0) && !*product_name(0x0563, 0xFFFF));

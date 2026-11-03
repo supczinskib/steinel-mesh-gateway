@@ -135,6 +135,8 @@ sdk += r'''
   void expire_access_operation_(uint32_t);
   void advance_address_recovery_(uint32_t);
   void dispatch_(uint32_t);
+  bool poll_priority_(uint32_t);
+  void dispatch_node_request_(const NodeRequest &,uint32_t);
   void poll_nodes_(uint32_t);
 };
 '''
@@ -154,6 +156,7 @@ using Command=SteinelMesh::NodeCommand;
 uint8_t physical_auto[16]{};
 uint8_t physical_on[16]{};
 uint16_t physical_level[16]{};
+uint32_t physical_threshold[16]{},physical_run[16]{};
 void setup(SteinelMesh &g,unsigned count,bool lighting=true) {
   test_now=1000;sdk_result=0;g.catalog_.count=count;
   for(unsigned i=0;i<count;++i) {
@@ -164,6 +167,7 @@ void setup(SteinelMesh &g,unsigned count,bool lighting=true) {
     auto &s=g.node_states_[i];s.last_seen=test_now;s.composition_checked=s.composition_matches=true;
     physical_auto[i]=lighting?1:0;
     physical_on[i]=0;physical_level[i]=0;
+    physical_threshold[i]=1000;physical_run[i]=120000;
     s.composition_at=test_now+IDENTITY_INTERVAL;s.supported=lighting?255:protocol::F_OUTPUT;
     s.on=0;s.brightness_known=lighting;s.automatic=lighting?1:-1;
     s.value_seen[0]=s.value_seen[1]=s.value_seen[2]=test_now;
@@ -177,6 +181,12 @@ void reply(SteinelMesh &g,bool drop_lc_set=true) {
   }
   if(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK) {
     physical_on[g.active_node_request_.node]=value;return;
+  }
+  if(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK) {
+    physical_level[g.active_node_request_.node]=value;return;
+  }
+  if(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET_UNACK) {
+    (property==THRESHOLD_PROPERTY?physical_threshold:physical_run)[g.active_node_request_.node]=value;return;
   }
   if(captured.opcode==ESP_BLE_MESH_MODEL_OP_SCENE_RECALL_UNACK) {
     physical_on[g.active_node_request_.node]=1;return;
@@ -207,11 +217,12 @@ void reply(SteinelMesh &g,bool drop_lc_set=true) {
     test_now=g.access_deadline_;g.expire_access_operation_(test_now);
   }else {
     esp_ble_mesh_light_client_cb_param_t p{};p.params=&params;
-    uint8_t data[]={uint8_t(value),uint8_t(value>>8),uint8_t(value>>16)};Buffer b{};b.data=data;b.len=3;
+    const uint32_t stored=(property==THRESHOLD_PROPERTY?physical_threshold:physical_run)[g.active_node_request_.node];
+    uint8_t data[]={uint8_t(stored),uint8_t(stored>>8),uint8_t(stored>>16)};Buffer b{};b.data=data;b.len=3;
     if(params.ctx.recv_op==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_STATUS)
       p.status_cb.lc_mode_status.mode=opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET?value:physical_auto[g.active_node_request_.node];
     else if(params.ctx.recv_op==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS) {
-      if(opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET)physical_level[g.active_node_request_.node]=value;
+      if(opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK)physical_level[g.active_node_request_.node]=value;
       p.status_cb.lightness_status.present_lightness=physical_level[g.active_node_request_.node];
     }else p.status_cb.lc_property_status={uint16_t(property),&b};
     g.node_light_event_(0,&p);
@@ -237,7 +248,7 @@ void lc_workflow() {
           }
           if(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET||captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK||
              captured.opcode==ESP_BLE_MESH_MODEL_OP_SCENE_RECALL||captured.opcode==ESP_BLE_MESH_MODEL_OP_SCENE_RECALL_UNACK||
-             captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET){++actions;if(!first_action)first_action=test_now;}
+             captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK){++actions;if(!first_action)first_action=test_now;}
           if(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_GET||captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_GET)++reads;
           reply(g);
         }
@@ -266,7 +277,7 @@ void polling_workflow() {
       if(request.kind==SET_ON)++writes;
       if(request.kind==ON)++reads;
       test_now+=latency;reply(g);
-      // Acknowledged writes also refresh the confirmed output value.
+      // Only reads refresh confirmed output, even during continuous writes.
       for(unsigned i=0;i<count;++i) {
         const auto confirmed=g.node_states_[i].value_seen[0];
         if(confirmed>seen[i]){max_gap=std::max(max_gap,confirmed-seen[i]);seen[i]=confirmed;}
@@ -396,6 +407,7 @@ void transaction_workflow() {
     bool received=false;
     for(unsigned tick=0;tick<40&&!received;++tick) {
       const auto before=acknowledged.mesh_tx_attempts_.load();
+      const auto seen_before=state.value_seen[field];
       acknowledged.dispatch_(test_now);
       if(acknowledged.mesh_tx_attempts_!=before) {
         const auto request=acknowledged.active_node_request_;
@@ -403,10 +415,9 @@ void transaction_workflow() {
             !((request.kind==SET_ON||request.kind==SET_LEVEL)&&request.step==0);
         reply(acknowledged,false);
         if(final_write) {
-          assert(acknowledged.node_completion_success_&&state.value_seen[field]==test_now);
-          const uint32_t reply_at=test_now;
-          test_now+=7;acknowledged.dispatch_(test_now);
-          assert(state.controls.after[field]==reply_at);
+          assert(acknowledged.node_completion_success_&&state.value_seen[field]==seen_before);
+        } else if(request.kind==ON+field&&!(state.controls.writing&(1U<<field))) {
+          assert(state.value_seen[field]==test_now);
           assert(state.controls.observe(field,requested,state.value_seen[field],test_now));
           assert(!state.controls.has(field));received=true;
         }
@@ -433,7 +444,7 @@ void transaction_workflow() {
       assert(verification.active_node_request_.kind==kind && verification.active_node_request_.verification);
     }
   }
-  // A lost final acknowledgement does not prove that the write was lost.
+  // SDK acceptance without any reply still schedules readback.
   SteinelMesh missed;setup(missed,1);
   assert(missed.send_node_request_({0,0,SET_ON,1,77,1,1}));
   test_now=missed.access_deadline_;missed.expire_access_operation_(test_now);
@@ -447,19 +458,24 @@ void transaction_workflow() {
   test_now+=200;g.dispatch_(test_now);assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK);
   assert(g.active_node_request_.attempts==1 && g.active_node_request_.tid==tid_sent && g.node_states_[0].failures==1);
   reply(g);test_now+=200;g.dispatch_(test_now);test_now+=200;g.dispatch_(test_now);
-  // A fair read may run between preparation and the output action.
-  for(unsigned i=0;captured.opcode!=ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET&&i<20;++i) {
+  for(unsigned i=0;captured.opcode!=ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK&&i<20;++i) {
     reply(g);test_now+=200;g.dispatch_(test_now);test_now+=200;g.dispatch_(test_now);
   }
-  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET && tid==tid_sent && value==1);
-  auto p=captured;p.ctx.recv_op=g.node_expected_status_;esp_ble_mesh_generic_client_cb_param_t cb{};cb.params=&p;
-  cb.status_cb.onoff_status.present_onoff=0;g.node_generic_event_(0,&cb);
-  assert(g.node_completion_pending_&&!g.node_completion_success_ && g.node_states_[0].on==0);
-  const auto sent=g.mesh_tx_attempts_.load();
-  for(unsigned i=0;i<20&&g.mesh_tx_attempts_==sent;++i){test_now+=200;g.dispatch_(test_now);}
-  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET && tid==tid_sent && g.active_node_request_.attempts==1);
+  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK && tid==tid_sent && value==1);
+  assert(g.node_completion_pending_&&g.node_completion_success_ && g.node_states_[0].on==0);
+  bool repeated=false;
+  for(unsigned i=0;i<20&&!repeated;++i) {
+    const auto sent=g.mesh_tx_attempts_.load();test_now+=200;g.dispatch_(test_now);
+    if(sent!=g.mesh_tx_attempts_) {
+      repeated=captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK&&g.active_node_request_.attempts==1;
+      if(!repeated)reply(g);
+    }
+  }
+  assert(repeated);
+  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK && tid==tid_sent && g.active_node_request_.attempts==1);
+  const auto failures_before_repeat=g.node_states_[0].failures;
   reply(g);test_now+=200;g.dispatch_(test_now);
-  assert(g.node_states_[0].on==1 && g.node_states_[0].force_poll && g.node_states_[0].failures==0);
+  assert(g.node_states_[0].on==0 && g.node_states_[0].force_poll && g.node_states_[0].failures==failures_before_repeat);
 
   // A newer queued intent supersedes an earlier preparation, without reusing its TID.
   SteinelMesh newer;setup(newer,1);assert(newer.queue_node_command(1,Command::ONOFF,1));
@@ -469,7 +485,7 @@ void transaction_workflow() {
   for(unsigned i=0;i<30&&!output;++i) {
     const auto before=newer.mesh_tx_attempts_.load();test_now+=200;newer.dispatch_(test_now);
     if(newer.mesh_tx_attempts_!=before){
-      if(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET){assert(value==0 && tid!=old_tid);output=true;}
+      if(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK){assert(value==0 && tid!=old_tid);output=true;}
       reply(newer);
     }
   }
@@ -490,13 +506,11 @@ void transaction_workflow() {
   full.dispatch_(test_now);const auto retry_tid=full.active_node_request_.tid;
   for(unsigned i=1;i<16;++i)assert(full.queue_node_command(1+8*i,Command::ONOFF,1));
   assert(full.node_queue_count_==15 && !full.queue_node_command(1,Command::ONOFF,0));
-  test_now=full.access_deadline_;full.expire_access_operation_(test_now);full.dispatch_(test_now);
-  assert(full.node_queue_count_==16 && full.node_queue_[0].attempts==1);
+  test_now+=20;full.dispatch_(test_now);
+  assert(full.node_queue_count_==16 && full.node_queue_[15].attempts==1 && full.node_queue_[15].tid==retry_tid);
   test_now+=200;full.dispatch_(test_now);
-  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET && full.active_node_request_.node==0 && tid==retry_tid);
-  test_now=full.access_deadline_;full.expire_access_operation_(test_now);full.dispatch_(test_now);
-  assert(full.node_queue_count_==15 && full.mesh_timeouts_==2);
-  for(unsigned i=0;i<full.node_queue_count_;++i)assert(full.node_queue_[i].node!=0);
+  assert(captured.opcode==ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK && full.active_node_request_.node==1);
+  assert(full.node_queue_count_==15 && full.mesh_timeouts_==0);
   std::puts("Transactions: send rejection, bounded retry/TID, newer intent and lost unacknowledged packet passed");
 }
 void mode_sequence_workflow() {
@@ -572,13 +586,15 @@ void output_confirmation_workflow() {
       if(g.mesh_tx_attempts_!=before) {
         const auto r=g.active_node_request_;
         if(r.verification) {
-          assert(r.kind==ON); // LC timeouts cannot delay the first physical read or its retries.
+          assert(r.kind==(night || attempts%2==0 ? ON : LEVEL));
+          assert(output_read(r.kind,r.step));
           ++attempts;
           if(dropped&&attempts<OUTPUT_VERIFY_ATTEMPTS) {
             test_now=g.access_deadline_;g.expire_access_operation_(test_now);
           } else {
             // A valid but early reply still reports the old output.
             physical_on[0]=!dropped&&attempts<3?0:1;
+            physical_level[0]=physical_on[0]?65535:0;
             reply(g,false);confirmed=g.node_states_[0].on==1;
           }
           if(!confirmed)assert(g.node_states_[0].on==0);

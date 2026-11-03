@@ -218,8 +218,10 @@ int main(){
   full.handle_diagnostic_session_(&begin);assert(begin.raw.status==503&&!full.device_diagnostics_.running);
   assert(subscriptions.size()==16&&full.diagnostic_group_count_==0);
   uint8_t transition[]={0,1,0x41};
+  now=1200;g.state_trace_.start(now,42);
   g.state_trace_.record(1234,4321,4322,protocol::StateTrace::RESPONSE,0x8294,0x8291,
                        0,3,0,0,1,1,1,0,transition,sizeof(transition));
+  now=1300;
   AsyncWebServerRequest trace;
   g.handle_state_trace_(&trace);assert(trace.raw.status==200);
   assert(trace.raw.body.find("PRIVATE_LOCATION")==std::string::npos);
@@ -227,25 +229,51 @@ int main(){
   AsyncWebServerRequest reset;reset.method_=HTTP_POST;
   g.handle_state_trace_(&reset);assert(reset.raw.status==400&&g.state_trace_.count==1);
   reset.args["action"]="reset";
-  g.handle_state_trace_(&reset);assert(reset.raw.status==200&&g.state_trace_.count==0&&!g.state_trace_.captured);
+  reset.args["id"]="42";
+  g.handle_state_trace_(&reset);assert(reset.raw.status==200&&g.state_trace_.count==0&&!g.state_trace_.running);
+  AsyncWebServerRequest passive;passive.method_=HTTP_POST;passive.args={{"action","start"}};
+  g.device_diagnostics_.running=false;
+  g.handle_state_trace_(&passive);assert(passive.raw.status==200&&g.state_trace_.running);
+  const auto session=g.state_trace_.id;
+  g.handle_state_trace_(&passive);assert(passive.raw.status==409&&g.state_trace_.id==session);
+  for(unsigned i=0;i<40;++i)g.state_trace_.record(now+i,12+i%3,12+i%3,protocol::StateTrace::SEND,0x8202,0x8202,
+      0,7,1,i,0,1,0,1,nullptr,0,0,3,1,0,3000);
+  AsyncWebServerRequest stream;stream.args={{"id",std::to_string(session)},{"after","0"}};
+  now+=100;g.handle_state_trace_(&stream);assert(stream.raw.status==200);std::puts(stream.raw.body.c_str());
+  stream.raw={};stream.args["after"]="35";g.handle_state_trace_(&stream);assert(stream.raw.status==200);std::puts(stream.raw.body.c_str());
+  stream.args["after"]="41";g.handle_state_trace_(&stream);assert(stream.raw.status==409);
+  stream.args["id"]="0";g.handle_state_trace_(&stream);assert(stream.raw.status==400);
+  stream.args["id"]=std::to_string(session+1);g.handle_state_trace_(&stream);assert(stream.raw.status==409);
+  AsyncWebServerRequest finish;finish.method_=HTTP_POST;finish.args={{"action","stop"},{"id",std::to_string(session+1)}};
+  g.handle_state_trace_(&finish);assert(finish.raw.status==409&&g.state_trace_.running);
+  finish.args["id"]=std::to_string(session);g.handle_state_trace_(&finish);assert(finish.raw.status==200&&!g.state_trace_.running);
+  stream.raw={};stream.args={{"id",std::to_string(session)},{"after","40"}};g.handle_state_trace_(&stream);
+  assert(stream.raw.status==200);std::puts(stream.raw.body.c_str());
 }
 '''
-with tempfile.TemporaryDirectory(prefix="steinel-diagnostics-") as temporary:
-    binary = str(Path(temporary) / "diagnostics")
-    code = harness + requests + writer + declaration.replace(" public:\n", " public:\n  struct NodeEntities;\n" + state + request, 1)
-    code += "  NodeRequest active_node_request_{};\n};\n" + groups + ready + methods + exporter + main
-    subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                    "-fsanitize=address,undefined", "-I", str(directory), "-x", "c++", "-", "-o", binary],
-                   input=code, text=True, check=True)
-    exported = subprocess.check_output([binary], text=True).splitlines()
-    report = json.loads(exported[0])
-    trace = json.loads(exported[1])
-    assert trace['captured'] and trace['incident_node'] == 4321 and not trace['frozen']
-    assert trace['events'][0]['before_auto'] == 1 and trace['events'][0]['after_auto'] == 0
-    assert trace['events'][0]['raw'] == '000141' and trace['events'][0]['request'] == 0x8291
-    assert report["firmware"] == "1.2.3" and report["composition"]["valid"]
-    assert all(packet["truncated"] and len(packet["raw"]) == 256 for packet in report["events"])
-    assert set(report) == {"schema", "gateway_version", "id", "elapsed_ms", "running", "probe_complete", "sequence",
-                           "company", "product", "firmware", "hardware", "elements", "composition", "events"}
-    assert all(set(element) == {"index", "capabilities", "bound"} for element in report["elements"])
-print("Device diagnostics: read-only probes, unselected nodes, privacy, limits, expiry and session validation passed")
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory(prefix="steinel-diagnostics-") as temporary:
+        binary = str(Path(temporary) / "diagnostics")
+        code = harness + requests + writer + declaration.replace(" public:\n", " public:\n  struct NodeEntities;\n" + state + request, 1)
+        code += "  NodeRequest active_node_request_{};\n};\n" + groups + ready + methods + exporter + main
+        subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                        "-fsanitize=address,undefined", "-I", str(directory), "-x", "c++", "-", "-o", binary],
+                       input=code, text=True, check=True)
+        exported = subprocess.check_output([binary], text=True).splitlines()
+        report = json.loads(exported[0])
+        trace = json.loads(exported[1])
+        assert trace['schema'] == 'steinel-state-trace/2' and trace['id'] == 42 and trace['running']
+        assert trace['events'][0]['before_auto'] == 1 and trace['events'][0]['after_auto'] == 0
+        assert trace['events'][0]['raw'] == '000141' and trace['events'][0]['request'] == 0x8291
+        stream, delta, empty = map(json.loads, exported[2:5])
+        assert stream['buffer_bytes'] <= 2048 and stream['buffer_events'] == 32 and stream['missed_events'] == 8
+        assert [event['sequence'] for event in stream['events']] == list(range(9,41))
+        assert set(event['node'] for event in stream['events']) == {12,13,14}
+        assert [event['sequence'] for event in delta['events']] == list(range(36,41)) and delta['missed_events'] == 0
+        assert empty['events'] == [] and not empty['running']
+        assert report["firmware"] == "1.2.3" and report["composition"]["valid"]
+        assert all(packet["truncated"] and len(packet["raw"]) == 256 for packet in report["events"])
+        assert set(report) == {"schema", "gateway_version", "id", "elapsed_ms", "running", "probe_complete", "sequence",
+                               "company", "product", "firmware", "hardware", "elements", "composition", "events"}
+        assert all(set(element) == {"index", "capabilities", "bound"} for element in report["elements"])
+    print("Device diagnostics: read-only probes, unselected nodes, privacy, limits, expiry and session validation passed")

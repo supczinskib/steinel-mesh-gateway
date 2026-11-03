@@ -8,7 +8,7 @@
 Steinel-Geräte <-> Bluetooth Mesh <-> ESP32-C3 Gateway -> Home Assistant
 ```
 
-Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.0** unterstützt mehrere Geräte aus einem Netzwerk.
+Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.1** unterstützt mehrere Geräte aus einem Netzwerk.
 
 Autor und Maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -133,7 +133,7 @@ Entscheidend sind die tatsächlichen Modelle und die Firmware, nicht allein der 
 
 Voraussetzungen für alle Einträge: gültiges Connect-Netzwerkbackup, Company ID `0x0563`, unterstützte Modelle mit importierter AppKey-Bindung und Einhaltung der folgenden Grenzen. Proprietäre ältere Bluetooth-Firmware, unverbundene Varianten, reine Z-Wave-/KNX-/DALI-Produkte und reine Client-Taster sind nicht eingeschlossen. Die Mesh-Konvertierung kann unwiderruflich sein und die Kompatibilität mit älteren Geräten verändern; vorher die [Steinel Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) prüfen.
 
-Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.0](docs/releases/v2.0.0.md).
+Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.1](docs/releases/v2.0.1.md).
 
 ## Identität und Funktionserkennung
 
@@ -143,14 +143,16 @@ Die Details zeigen Modell, Hersteller, Company-/Product-ID und Mesh-Modelle sowi
 
 Die Hauptliste enthält Steinel-Geräte. Einträge ohne Herstellerkennung erscheinen separat unter **Nicht erkannte Geräte**; Geräte mit einer anderen bekannten Herstellerkennung werden ausgeblendet. Nach dem Import sind Cloud-Anmeldung und lokaler Sicherungsimport unter **Netzwerk ändern oder erneut importieren** eingeklappt und bleiben für spätere Konfigurationsänderungen verfügbar.
 
-Gewählte Einstellungen erscheinen sofort in der Weboberfläche und Home Assistant und werden im Hintergrund bestätigt. Tatsächlicher Ausgangszustand und Messwerte stammen aus Geräteantworten, nicht aus Berechnungen. Nach einer Steuerungsänderung hat die Ausgangsabfrage Vorrang und wird ohne Warten auf den nächsten regulären Abfragezyklus wiederholt. NightmatIQ Plus stellt Betriebsart, Dämmerungsschwelle, Beleuchtungsstärke und tatsächlichen Ausgangszustand bereit, ohne Helligkeitssteuerung oder Bewegungsnachlaufzeit.
+Gewählte Einstellungen erscheinen sofort in der Weboberfläche und werden im Hintergrund bestätigt. In Home Assistant zeigt **Output** den vom Gerät empfangenen Zustand; das Einreihen eines Befehls ändert ihn nicht. Andere gewählte Einstellungen erscheinen sofort, während die Bestätigung noch aussteht. Ausgangszustand und Messwerte werden nicht aus Befehlen abgeleitet. Nach einer Steuerungsänderung hat die Ausgangsabfrage Vorrang und wird ohne Warten auf den nächsten regulären Abfragezyklus wiederholt. NightmatIQ Plus stellt Betriebsart, Dämmerungsschwelle, Beleuchtungsstärke und tatsächlichen Ausgangszustand bereit, ohne Helligkeitssteuerung oder Bewegungsnachlaufzeit.
+
+Ausgänge haben einen eigenen Abfrageplan mit einem Basisintervall von 2 Sekunden, angepasst an die Anzahl der Ausgänge und die gemessenen Antwortzeiten. Eine einzelne fehlende Antwort wird zeitnah erneut abgefragt; wiederholte Fehlschläge desselben Ausgangs verlängern dessen Wiederholungsintervall. Netzverkehr und die Aktualisierung anderer Werte können diese Intervalle verlängern; sie sind keine garantierten maximalen Verzögerungen. Der aktuelle Lightness-Actual-Wert desselben Ausgangs aktualisiert auch dessen OnOff-Zustand, ohne den Übergangszielwert als aktuellen Zustand zu verwenden. Diagnoseantworten ausgewählter Geräte aktualisieren während der Berichtserfassung auch deren normale Zustände.
 
 ## Grenzen und Speicher
 
 - Ein Netzwerk, ein NetKey/AppKey-Paar, bis zu **16 importierte Geräte**, **8 Elemente je Gerät** und **16 Sensor-Publikationsgruppen**.
 - Modelle mit anderem AppKey werden nicht für die Steuerung bereitgestellt.
 - Eine Warteschlange mit 16 Einträgen fasst ungesendete Änderungen zusammen; ein Eintrag bleibt für Fortsetzung oder Wiederholung einer Transaktion reserviert.
-- Nur eine bestätigungspflichtige Transaktion gleichzeitig; Prüfung von Adresse, Opcode und Eigenschaft. Begrenzte Schreibwiederholung mit derselben TID.
+- Nur eine Abfrage mit Antwort gleichzeitig; Prüfung von Adresse, Opcode und Eigenschaft. Steuerbefehle warten nicht auf Bestätigungen. Wiederholungen sind begrenzt und behalten die TID bei, sofern das Modell sie definiert. Separate Abfragen prüfen den tatsächlichen Gerätezustand.
 - Hintergrundabfragen werden schrittweise erzeugt, nicht als vollständige Geräteliste gepuffert.
 - Ein 512-Byte-Flash-Lesepuffer vermeidet das vollständige JSON im RAM.
 - Die Sicherung liegt vorübergehend in der **inaktiven OTA-Partition**. Deren bisheriges Firmware-Image wird überschrieben; die Arbeitskopie wird anschließend gelöscht.
@@ -163,6 +165,8 @@ Die Webdiagnose zeigt während des Betriebs den freien internen RAM und den grö
 Für ein weiteres Gerät in dessen Details **Gerätebericht erstellen** wählen, das Modell vom Etikett eingeben und die Aufzeichnung starten. Beobachtungen wie ein abgedeckter Lichtsensor oder ausgelöste Bewegung lassen sich markieren. **Bericht herunterladen** beendet die Aufzeichnung und speichert eine JSON-Datei für ein Issue. Die Nur-Lese-Sitzung dauert bis zu drei Minuten und funktioniert auch für importierte Geräte ohne HA-Auswahl. Schlüssel, Zugangsdaten, private Namen, UUIDs und Netzwerkadressen werden ausgelassen. Enthalten sind Composition Data, SIG-/Herstellermodelle, Rohantworten, Fehler und Kennzeichnungen für gekürzte oder fehlende Daten. Das Gateway hält einen begrenzten RAM-Puffer; der Browser sammelt den Verlauf. Die Seite daher geöffnet lassen. Auch bei Verbindungsverlust lassen sich erfasste Daten herunterladen; ein unbestätigter Stopp oder fehlgeschlagener letzter Abruf wird im Bericht markiert.
 
 In Automationen die Entität **Available** des jeweiligen Geräts prüfen. Ausgang und Automatik nutzen eine On/Off-Auswahl, deren Zustand nach Ablauf des jeweiligen Messwerts unbekannt wird. Befehle ohne aktuelle Geräteantwort oder bei einer bestätigten Abweichung der Composition Data werden abgewiesen. Sensordiagnosen speichern bis zu acht Eigenschaften getrennt nach Element, ohne Flash-Schreibzugriffe; sie sind im Web und als standardmäßig deaktivierte Textentität **Sensor diagnostics** verfügbar.
+
+Bei Befehlsverzögerungen **Mesh-Netzwerk > Gateway-Diagnose > Befehlsaufzeichnung** öffnen. Eine passive Aufzeichnung starten, das Verhalten reproduzieren und **STOPPEN UND AUFZEICHNUNG LADEN** wählen. Befehle, Wartezeiten, Bluetooth-SDK-Aufrufe und Antworten werden bis zu drei Minuten lang ohne zusätzliche Mesh-Anfragen erfasst. Die Aufzeichnung ist standardmäßig ausgeschaltet; das Gateway verwendet einen festen Puffer von höchstens 2 KiB, während der Browser den Verlauf speichert. Fehlende Ereignisse werden im Export gekennzeichnet. Ein SDK-Aufruf oder erfolgreicher Rückgabewert bestätigt weder eine Funkübertragung noch das physische Schalten.
 
 ## Sicherheit
 

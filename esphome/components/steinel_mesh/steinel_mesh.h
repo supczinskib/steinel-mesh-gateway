@@ -121,7 +121,7 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   static constexpr size_t ADMIN_PASSWORD_MAX_LENGTH = 63;
   static constexpr uint32_t AUTO_UPDATE_MAGIC = 0x4E4D5155U;  // "NMQU"
   static constexpr uint16_t AUTO_UPDATE_VERSION = 1;
-  static constexpr size_t AUTO_UPDATE_VERSION_MAX_LENGTH = 23;
+  static constexpr size_t AUTO_UPDATE_VERSION_MAX_LENGTH = protocol::MAX_FIRMWARE_VERSION_LENGTH;
   static constexpr size_t AUTO_UPDATE_URL_MAX_LENGTH = 255;
   static constexpr uint16_t STEINEL_COMPANY_ID = 0x0563;
   static constexpr uint16_t NIGHTMATIQ_PRODUCT_ID = 0x1DCE;
@@ -281,6 +281,7 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
     std::array<uint8_t, 5> verify_attempts{};
     uint16_t company{0}, product{0}, composition_version{0};
     uint16_t supported{0};
+    uint16_t output_rtt_ms{0};
     char firmware[17]{}, hardware[17]{};
     uint8_t sensor_probes[protocol::MAX_ELEMENTS]{};
     uint8_t lux_probes[protocol::MAX_ELEMENTS]{};
@@ -291,10 +292,11 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
     uint32_t poll_at{0};
     uint8_t poll_step{0};
     bool discovery_complete{false}, force_poll{false}, metadata_sent{false};
+    bool output_lightness_next{false};
     bool composition_checked{false}, composition_matches{false};
     uint32_t composition_at{0};
     bool dirty{false};
-    uint8_t failures{0};
+    uint8_t failures{0}, output_failures{0};
     bool was_available{false};
     uint32_t retry_at{0};
     NodeEntities *entities{nullptr};
@@ -371,6 +373,8 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   bool restore_catalog_();
   void setup_node_entities_();
   void advance_nodes_(uint32_t now);
+  bool poll_priority_(uint32_t now);
+  void dispatch_node_request_(const NodeRequest &request, uint32_t now);
   bool send_node_request_(const NodeRequest &request);
   void finish_node_request_(bool success);
   bool node_event_(const esp_ble_mesh_client_common_param_t *params, uint32_t received,

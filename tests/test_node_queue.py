@@ -34,7 +34,7 @@ class SteinelMesh {
   struct NodeRequest { uint8_t node, element, kind, attempts, tid; uint32_t value; uint8_t step{0}; bool diagnostic{false},verification{false}; };
   std::atomic<uint16_t> node_destination_{0};
   std::atomic<uint32_t> node_expected_status_{0};
-  struct NodeState { bool composition_matches{true},composition_checked{true}; uint32_t last_seen{1000},stale_after{180000}; uint16_t supported{255}; uint8_t failures{0}; uint32_t retry_at{0},poll_at{0}; uint8_t poll_step{0}; bool discovery_complete{false},force_poll{false},dirty{false}; int8_t on{-1},automatic{-1}; protocol::ConfirmedMode mode{}; protocol::PendingControls controls{}; uint8_t verify_fields{0},verify_next{0}; std::array<uint8_t,5> verify_attempts{}; std::array<uint32_t,7> value_seen{}; };
+  struct NodeState { bool composition_matches{true},composition_checked{true}; uint32_t last_seen{1000},stale_after{180000}; uint16_t supported{255},output_rtt_ms{0}; uint8_t failures{0},output_failures{0}; bool output_lightness_next{false}; uint32_t retry_at{0},poll_at{0}; uint8_t poll_step{0}; bool discovery_complete{false},force_poll{false},dirty{false}; int8_t on{-1},automatic{-1}; protocol::ConfirmedMode mode{}; protocol::PendingControls controls{}; uint8_t verify_fields{0},verify_next{0}; std::array<uint8_t,5> verify_attempts{}; std::array<uint32_t,7> value_seen{},value_poll_at{}; };
   struct Config { uint16_t onoff_address{1}; } config_;
   static constexpr size_t NODE_QUEUE_SIZE = 16;
   bool catalog_valid_{true}, legacy_profile_{false};
@@ -151,8 +151,8 @@ int main() {
   gateway.active_node_request_ = {0, 0, SET_MODE, 0, 42, 0, 1};
   gateway.node_completion_pending_ = true; gateway.node_completion_success_ = false;
   gateway.test_completion(test_now);
-  assert(gateway.node_queue_count_ == 16 && gateway.node_queue_[0].kind == SET_MODE);
-  assert(gateway.node_queue_[0].tid == 42 && gateway.node_queue_[0].attempts == 1);
+  assert(gateway.node_queue_count_ == 16 && gateway.node_queue_[15].kind == SET_MODE);
+  assert(gateway.node_queue_[15].tid == 42 && gateway.node_queue_[15].attempts == 1);
   gateway.node_queue_count_ = 0;
   gateway.active_node_request_.attempts = 1;
   gateway.node_completion_pending_ = true; gateway.test_completion(test_now);
@@ -172,12 +172,36 @@ int main() {
   assert(gateway.node_queue_count_ == 1 && gateway.node_queue_[0].step == 1);
   gateway.active_node_request_ = gateway.node_queue_[0]; gateway.node_queue_count_ = 0;
   gateway.node_completion_pending_ = true; gateway.test_completion(test_now);
+  assert(gateway.node_queue_count_ == 1 && gateway.node_queue_[0].attempts == 1);
+  assert(gateway.node_queue_[0].tid == gateway.active_node_request_.tid);
+  gateway.active_node_request_ = gateway.node_queue_[0]; gateway.node_queue_count_ = 0;
+  gateway.node_completion_pending_ = true; gateway.test_completion(test_now);
   assert(gateway.node_queue_count_ == 0 && gateway.node_states_[0].force_poll);
+  assert(gateway.node_states_[0].controls.after[0] == test_now);
+  assert(gateway.queue_node_command(1, Command::ONOFF, 1));
+  gateway.node_queue_[0].attempts = 1; gateway.node_queue_[0].step = 1;
+  assert(gateway.queue_node_command(1, Command::MODE, 0));
+  assert(gateway.node_queue_count_ == 1 && gateway.node_queue_[0].kind == SET_MODE);
+  gateway.node_queue_count_ = 0;
   gateway.catalog_.nodes[0].elements[0].capabilities &= ~protocol::LC;
   assert(!gateway.queue_node_command(1, Command::BRIGHTNESS, 100));
   gateway.catalog_.nodes[0].nightmatiq = false;
   assert(gateway.queue_node_command(1, Command::BRIGHTNESS, 100));
   assert(gateway.node_queue_[0].step == 1);
+  // Output fallback shares the output retry budget, not the brightness budget.
+  gateway.node_queue_count_=0;
+  auto &state=gateway.node_states_[0];state.verify_fields=0;state.verify_attempts={};
+  gateway.active_node_request_={0,0,LEVEL,0,0,0,OUTPUT_LIGHTNESS_READ,false,true};
+  gateway.node_completion_pending_=true;gateway.node_completion_success_=false;
+  gateway.test_completion(test_now);
+  assert(state.verify_attempts[0]==1 && state.verify_attempts[1]==0 && state.verify_fields==1);
+  assert(state.output_failures>0 && !state.output_lightness_next);
+  gateway.active_node_request_.kind=ON;gateway.active_node_request_.step=0;
+  gateway.node_completion_pending_=true;gateway.test_completion(test_now);
+  assert(state.output_lightness_next && state.verify_attempts[0]==2);
+  state.verify_attempts[0]=OUTPUT_VERIFY_ATTEMPTS-1;state.verify_fields=0;
+  gateway.node_completion_pending_=true;gateway.test_completion(test_now);
+  assert(state.verify_fields==0 && state.verify_attempts[0]==OUTPUT_VERIFY_ATTEMPTS);
   std::puts("Actual command queue: validation, stale/function gating, bounds and coalesced TIDs passed");
 }
 '''

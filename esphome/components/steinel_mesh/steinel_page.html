@@ -35,7 +35,13 @@ input[type="checkbox"]{accent-color:var(--accent)}
 <div class="actions"><button id="reportMark" disabled>MARK OBSERVATION</button></div>
 <p id="reportStatus" class="notice">Ready to collect</p>
 </section>
-<section id="configured" class="panel hidden"><h2>Mesh network</h2><div class="details"><span>Network: <b id="networkName">—</b></span><span>Gateway Mesh address: <b id="localAddress">—</b></span><span>IV Index: <b id="savedIv">—</b></span><span>Runtime mode: <b id="runtimeMode">—</b></span><span>Mesh: <b id="meshState">—</b></span></div><details id="diagnostics" class="diagnostics hidden"><summary>Gateway diagnostics</summary><div class="details"><span>Gateway uptime: <b id="gatewayUptime">—</b></span><span>Last reset reason: <b id="resetReason">—</b></span><span>Free internal heap: <b id="freeHeap">—</b></span><span>Largest free block: <b id="largestBlock">—</b></span><span>Mesh transmissions: <b id="meshTx">—</b></span><span>Mesh send errors: <b id="meshTxErrors">—</b></span><span>Mesh responses / timeouts: <b id="meshStats">—</b></span><span>Last Mesh RSSI: <b id="meshRssi">—</b></span></div></details><div class="actions"><button id="refreshDevices">REFRESH DEVICES</button><button id="disable">DISABLE MESH</button><button id="enable" class="primary">ENABLE MESH</button><button id="remove" class="danger">REMOVE CONFIGURATION</button></div></section>
+<section id="configured" class="panel hidden"><h2>Mesh network</h2><div class="details"><span>Network: <b id="networkName">—</b></span><span>Gateway Mesh address: <b id="localAddress">—</b></span><span>IV Index: <b id="savedIv">—</b></span><span>Runtime mode: <b id="runtimeMode">—</b></span><span>Mesh: <b id="meshState">—</b></span></div><details id="diagnostics" class="diagnostics hidden"><summary>Gateway diagnostics</summary><div class="details"><span>Gateway uptime: <b id="gatewayUptime">—</b></span><span>Last reset reason: <b id="resetReason">—</b></span><span>Free internal heap: <b id="freeHeap">—</b></span><span>Largest free block: <b id="largestBlock">—</b></span><span>Mesh transmissions: <b id="meshTx">—</b></span><span>Mesh send errors: <b id="meshTxErrors">—</b></span><span>Mesh responses / timeouts: <b id="meshStats">—</b></span><span>Last Mesh RSSI: <b id="meshRssi">—</b></span></div>
+<div class="maintenance-section"><h3>Command trace</h3>
+<p class="notice">Passive capture for all devices, up to 3 minutes. Keep this page open. No additional Mesh requests are sent. The browser stores the recording; the gateway uses a small fixed buffer.</p>
+<p class="notice">The trace contains Mesh element addresses and command/state data, but no keys, passwords, device names or account details.</p>
+<div class="actions"><button id="traceStart" class="primary">START COMMAND TRACE</button><button id="traceDownload" disabled>STOP AND DOWNLOAD TRACE</button></div>
+<p id="traceStatus" class="notice">Ready to collect</p></div>
+</details><div class="actions"><button id="refreshDevices">REFRESH DEVICES</button><button id="disable">DISABLE MESH</button><button id="enable" class="primary">ENABLE MESH</button><button id="remove" class="danger">REMOVE CONFIGURATION</button></div></section>
 <details id="networkImport" class="panel network-import"><summary id="networkImportSummary">Set up a Mesh network</summary>
 <p id="importMeshHelp" class="notice hidden">Disable Mesh before changing or reimporting the network.</p>
 <section id="setup" class="maintenance-section"><h2>1. Steinel Cloud account</h2><div class="grid"><div class="field"><label>Email</label><input id="email" type="email" autocomplete="username"></div><div class="field"><label>Password</label><input id="password" type="password" autocomplete="current-password"></div></div><div class="actions"><button id="discover" class="primary">DOWNLOAD NETWORK LIST</button></div></section>
@@ -58,8 +64,8 @@ const PAGE_REVISION='__STEINEL_PAGE_REVISION__';
 const q=s=>document.querySelector(s),message=q('#message'),dot=q('#dot'),state=q('#state'),discover=q('#discover'),install=q('#install'),enable=q('#enable'),disable=q('#disable'),remove=q('#remove'),select=q('#network'),firmware=q('#firmware'),otaUpdate=q('#otaUpdate'),otaProgress=q('#otaProgress'),otaStatus=q('#otaStatus'),checkUpdate=q('#checkUpdate'),installAvailableUpdate=q('#installAvailableUpdate'),gatewayVersion=q('#gatewayVersion'),latestGatewayVersion=q('#latestGatewayVersion'),newPassword=q('#newPassword'),passwordConfirmation=q('#passwordConfirmation'),changePassword=q('#changePassword'),passwordInfo=q('#passwordInfo'),wifiSsid=q('#wifiSsid'),wifiPassword=q('#wifiPassword'),wifiInfo=q('#wifiInfo'),saveWifi=q('#saveWifi'),factoryReset=q('#factoryReset');let lastNetworks='',otaBusy=false,otaTransferred=false,wifiSsidEdited=false,lastStatus=null,availableRelease=null;
 const RELEASE_API='https://api.github.com/repos/supczinskib/steinel-mesh-gateway/releases/latest',RELEASE_ASSET_PREFIX='steinel-mesh-esp32-c3-gateway-v';
 const otaRestart=()=>{otaProgress.value=100;otaStatus.textContent='Upload received. The gateway is restarting and verifying the new firmware…';message.textContent='Firmware uploaded; waiting for startup verification';dot.className='dot'};
-const versionParts=value=>value.replace(/^v/,'').split('.').map(part=>Number(part));
-const compareVersions=(left,right)=>{const a=versionParts(left),b=versionParts(right);for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1}return 0};
+const versionParts=value=>{const match=String(value).match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$/);if(!match||String(value).replace(/^v/,'').length>23)throw Error('Invalid firmware version');const parts=match.slice(1).map(part=>Number(part||0));if(parts.some(part=>part>65535))throw Error('Invalid firmware version');return parts};
+const compareVersions=(left,right)=>{const a=versionParts(left),b=versionParts(right);for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1}if(a[3]===b[3])return 0;if(a[3]===0)return 1;if(b[3]===0)return -1;return a[3]>b[3]?1:-1};
 const values=()=>{const p=new URLSearchParams;p.set('email',q('#email').value);p.set('password',q('#password').value);return p};
 async function post(url,p){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p}),j=await r.json();if(!r.ok)throw Error(j.message||`HTTP ${r.status}`);return j}
 let statusPollPromise=null;
@@ -133,7 +139,7 @@ checkUpdate.onclick=checkForUpdates;
 const watchAutomaticUpdate=target=>{const watch=async()=>{try{const response=await fetch('/steinel/status',{cache:'no-store'});if(!response.ok)throw Error();const current=await response.json();otaProgress.classList.remove('hidden');otaProgress.value=current.auto_update_progress||0;otaStatus.textContent=current.message;if(current.auto_update_mode||current.auto_update_running){setTimeout(watch,1000);return}if(current.gateway_version===target&&current.firmware_pending_validation){otaStatus.textContent=`Firmware ${target} is running and being validated. Do not disconnect power…`;setTimeout(watch,1500);return}if(current.gateway_version===target){otaProgress.value=100;otaStatus.textContent=`Firmware ${target} installed and confirmed successfully.`;setTimeout(()=>location.reload(),2500);return}otaBusy=false;otaStatus.textContent=`The update was not installed. Version ${current.gateway_version} remains active.`;poll()}catch(e){otaStatus.textContent='Gateway is restarting into firmware update mode…';setTimeout(watch,1500)}};setTimeout(watch,3000)};
 const watchManualUpdate=(target,previous)=>{const started=Date.now();let sawPending=false;const watch=async()=>{try{const response=await fetch('/steinel/status',{cache:'no-store'});if(!response.ok)throw Error();const current=await response.json();gatewayVersion.textContent=current.gateway_version||'—';if(Date.now()-started<8000){setTimeout(watch,1200);return}if(current.firmware_pending_validation){sawPending=true;otaStatus.textContent=`Firmware ${current.gateway_version} is running and being validated. Do not disconnect power…`;setTimeout(watch,1500);return}const expectedInstalled=!target||current.gateway_version===target;if(expectedInstalled&&(sawPending||current.gateway_version!==previous)){otaBusy=false;otaProgress.value=100;otaStatus.textContent=`Firmware ${current.gateway_version} installed and confirmed successfully.`;setTimeout(()=>location.reload(),2500);return}if(Date.now()-started<90000){otaStatus.textContent='Waiting for the restarted gateway to confirm the new firmware…';setTimeout(watch,1500);return}otaBusy=false;otaStatus.textContent=`The update was not confirmed. Version ${current.gateway_version} remains active.`;otaUpdate.disabled=false;firmware.disabled=false;poll()}catch(e){otaStatus.textContent='Gateway is restarting and verifying the uploaded firmware…';setTimeout(watch,1500)}};setTimeout(watch,1500)};
 installAvailableUpdate.onclick=async()=>{if(!availableRelease)return;if(!confirm(`Download, verify and install firmware ${availableRelease.version}?`))return;try{otaBusy=true;checkUpdate.disabled=true;installAvailableUpdate.disabled=true;otaProgress.classList.remove('hidden');otaProgress.value=0;otaStatus.textContent='Scheduling verified firmware download…';const params=new URLSearchParams;params.set('version',availableRelease.version);params.set('url',availableRelease.url);params.set('sha256',availableRelease.sha256);params.set('size',String(availableRelease.size));const result=await post('/steinel/update',params);otaStatus.textContent=result.message;watchAutomaticUpdate(availableRelease.version)}catch(e){otaBusy=false;checkUpdate.disabled=false;installAvailableUpdate.disabled=false;otaStatus.textContent=e.message}};
-otaUpdate.onclick=()=>{const file=firmware.files[0];if(!file){otaStatus.textContent='Select an ESPHome OTA .bin firmware file first.';return}if(file.name.toLowerCase().includes('factory')){otaStatus.textContent='Factory images are only for USB installation. Select the OTA image.';return}if(!confirm('Install this firmware and restart the gateway?'))return;const previous=gatewayVersion.textContent,target=(file.name.match(/v(\d+\.\d+\.\d+)-ota\.bin$/i)||[])[1]||'';otaBusy=true;otaTransferred=false;otaUpdate.disabled=true;firmware.disabled=true;otaProgress.classList.remove('hidden');otaProgress.value=0;otaStatus.textContent='Uploading firmware…';const data=new FormData;data.append('update',file,file.name);const xhr=new XMLHttpRequest;xhr.open('POST','/update');xhr.upload.onprogress=e=>{if(e.lengthComputable){otaProgress.value=Math.round(e.loaded*100/e.total);otaTransferred=e.loaded===e.total;otaStatus.textContent=`Uploading firmware… ${otaProgress.value}%`}};const verify=()=>{otaRestart();watchManualUpdate(target,previous)};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300&&(xhr.responseText.includes('Successful')||(otaTransferred&&!xhr.responseText.includes('Failed')))){verify()}else{otaBusy=false;otaUpdate.disabled=false;firmware.disabled=false;otaStatus.textContent=xhr.responseText||`Update failed (HTTP ${xhr.status})`;poll()}};xhr.onerror=()=>{if(otaTransferred){verify()}else{otaBusy=false;otaUpdate.disabled=false;firmware.disabled=false;otaStatus.textContent='Upload connection failed. The previous firmware remains active.';poll()}};xhr.send(data)};
+otaUpdate.onclick=()=>{const file=firmware.files[0];if(!file){otaStatus.textContent='Select an ESPHome OTA .bin firmware file first.';return}if(file.name.toLowerCase().includes('factory')){otaStatus.textContent='Factory images are only for USB installation. Select the OTA image.';return}if(!confirm('Install this firmware and restart the gateway?'))return;const previous=gatewayVersion.textContent,target=(file.name.match(/v(\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?)-ota\.bin$/i)||[])[1]||'';otaBusy=true;otaTransferred=false;otaUpdate.disabled=true;firmware.disabled=true;otaProgress.classList.remove('hidden');otaProgress.value=0;otaStatus.textContent='Uploading firmware…';const data=new FormData;data.append('update',file,file.name);const xhr=new XMLHttpRequest;xhr.open('POST','/update');xhr.upload.onprogress=e=>{if(e.lengthComputable){otaProgress.value=Math.round(e.loaded*100/e.total);otaTransferred=e.loaded===e.total;otaStatus.textContent=`Uploading firmware… ${otaProgress.value}%`}};const verify=()=>{otaRestart();watchManualUpdate(target,previous)};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300&&(xhr.responseText.includes('Successful')||(otaTransferred&&!xhr.responseText.includes('Failed')))){verify()}else{otaBusy=false;otaUpdate.disabled=false;firmware.disabled=false;otaStatus.textContent=xhr.responseText||`Update failed (HTTP ${xhr.status})`;poll()}};xhr.onerror=()=>{if(otaTransferred){verify()}else{otaBusy=false;otaUpdate.disabled=false;firmware.disabled=false;otaStatus.textContent='Upload connection failed. The previous firmware remains active.';poll()}};xhr.send(data)};
 const deviceList=q('#deviceList'),saveSelection=q('#saveSelection');
 let deviceSignature='',deviceControls=[];
 const meshAddress=n=>'0x'+n.toString(16).padStart(4,'0');
@@ -336,6 +342,110 @@ q('#reportDownload').onclick=async()=>{
   document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   q('#reportDownload').disabled=false;
 };
+const TRACE_EVENT_LIMIT=4096;
+let commandTrace=null,traceTimer=0,traceReadPromise=null,traceStarting=false,traceSaving=false;
+const tracePost=parameters=>controlFetch('/api/state-trace',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:parameters});
+function traceStatus(text){
+  const status=q('#traceStatus');status.textContent=text;
+  if(commandTrace){
+    const counter=document.createElement('span');counter.setAttribute('data-i18n-ignore','');
+    counter.textContent=` · ${commandTrace.events.length} / ${commandTrace.sequence} · ${Math.round(commandTrace.elapsed_ms/1000)}s`;
+    status.append(counter);
+  }
+}
+function readCommandTrace(){
+  if(!traceReadPromise)traceReadPromise=collectCommandTrace().finally(()=>{traceReadPromise=null});
+  return traceReadPromise;
+}
+async function collectCommandTrace(){
+  const trace=commandTrace;if(!trace)return;
+  const requestedAt=Date.now();
+  const snapshot=await controlFetch(`/api/state-trace?id=${trace.id}&after=${trace.sequence}`,{cache:'no-store'});
+  const receivedAt=Date.now();
+  if(commandTrace!==trace)return;
+  if(snapshot.schema!=='steinel-state-trace/2'||snapshot.id!==trace.id||!Array.isArray(snapshot.events)||
+      !Number.isInteger(snapshot.sequence)||snapshot.sequence<trace.sequence)throw Error('Command trace session changed');
+  let previous=trace.sequence,missed=0;const collected=[];
+  for(const event of snapshot.events){
+    if(!Number.isInteger(event.sequence)||event.sequence<=previous||event.sequence>snapshot.sequence)
+      throw Error('Invalid command trace sequence');
+    if(event.sequence>previous+1)missed+=event.sequence-previous-1;
+    previous=event.sequence;
+    if(trace.events.length+collected.length<TRACE_EVENT_LIMIT){
+      const saved={};
+      for(const key of ['sequence','at_ms','elapsed_ms','node','address','event','sdk_event','opcode','request','kind','step','tid','queue_depth','attempt','flags','detail','error','before_on','after_on','before_auto','after_auto']){
+        if(!Number.isInteger(event[key]))throw Error('Invalid command trace event');
+        saved[key]=event[key];
+      }
+      saved.raw=reportHex(event.raw,3);collected.push(saved);
+    }
+  }
+  if(previous!==snapshot.sequence)throw Error('Incomplete command trace response');
+  trace.missed_events+=missed;trace.events.push(...collected);
+  if(trace.events.length===TRACE_EVENT_LIMIT)trace.browser_limit_reached=true;
+  trace.sequence=snapshot.sequence;trace.gateway_version=String(snapshot.gateway_version||'').slice(0,23);
+  trace.started_at_ms=reportNumber(snapshot.started_at_ms);trace.elapsed_ms=reportNumber(snapshot.elapsed_ms,180000);
+  const anchor={gateway_uptime_ms:reportNumber(snapshot.uptime_ms),gateway_elapsed_ms:trace.elapsed_ms,
+    browser_request_unix_ms:requestedAt,browser_response_unix_ms:receivedAt};
+  if(!trace.clock_anchors.first)trace.clock_anchors.first=anchor;
+  const best=trace.clock_anchors.shortest_round_trip;
+  if(!best||receivedAt-requestedAt<best.browser_response_unix_ms-best.browser_request_unix_ms)
+    trace.clock_anchors.shortest_round_trip=anchor;
+  trace.clock_anchors.last=anchor;
+  trace.gateway_buffer_bytes=reportNumber(snapshot.buffer_bytes,2048);trace.gateway_buffer_events=reportNumber(snapshot.buffer_events,32);
+  trace.running=snapshot.running===true;trace.expired=snapshot.expired===true;trace.last_read_failed=false;
+  traceStatus(trace.missed_events||trace.browser_limit_reached?'Trace has missing events':trace.running?'Recording command trace':'Command trace ready');
+  q('#traceDownload').disabled=false;
+}
+async function watchCommandTrace(){
+  clearTimeout(traceTimer);const trace=commandTrace;if(!trace||!trace.running||traceSaving)return;
+  try{await readCommandTrace()}catch(error){
+    if(commandTrace!==trace)return;
+    trace.last_read_failed=true;traceStatus(error.message);
+    if(error.message==='Command trace session changed'){trace.running=false;trace.collection_stop_unconfirmed=true}
+  }
+  if(commandTrace===trace&&trace.running&&!traceSaving)traceTimer=setTimeout(watchCommandTrace,500);
+  else if(!trace.running)q('#traceStart').disabled=false;
+}
+q('#traceStart').onclick=async()=>{
+  if(traceStarting||traceSaving||commandTrace?.running)return;
+  if(commandTrace&&!confirm('Discard the collected command trace and start again?'))return;
+  traceStarting=true;q('#traceStart').disabled=true;
+  try{
+    const result=await tracePost(new URLSearchParams({action:'start'}));
+    if(!Number.isInteger(result.id)||result.id<=0||result.id>0xFFFFFFFF)throw Error('Invalid command trace session');
+    commandTrace={schema:'steinel-state-trace/2',id:result.id,gateway_version:'',started_at_ms:0,elapsed_ms:0,sequence:0,
+      running:true,expired:false,missed_events:0,last_read_failed:false,collection_stop_unconfirmed:false,browser_limit_reached:false,
+      gateway_buffer_bytes:0,gateway_buffer_events:32,browser_event_limit:TRACE_EVENT_LIMIT,
+      clock_anchors:{first:null,shortest_round_trip:null,last:null},
+      timing:'Gateway monotonic milliseconds. SEND is an SDK invocation; SDK_RESULT is its return value, not proof of on-air transmission.',
+      clock_alignment:'Browser Unix timestamps bracket each saved clock anchor; cross-system alignment depends on browser/HA clock synchronization. Event ordering uses gateway time.',
+      event_types:['queued','send','response','timeout','send_error','sdk_result','stage_finished','wait','received'],
+      completion_semantics:'Stage completion is gateway bookkeeping, not physical confirmation. Only device status replies carry observed state.',
+      payload_encoding:'Decoded value prefix, at most 3 bytes. Generic/LC OnOff status includes present, target and remaining time when supplied by the device.',
+      request_kinds:['composition','output_get','brightness_get','automatic_get','threshold_get','run_time_get','sensor_get','output_set','brightness_set','automatic_set','threshold_set','run_time_set','descriptors_get','sensor_property_get','mode_set'],
+      received_command_kinds:['output','brightness','automatic','threshold','run_time','mode'],
+      wait_flags:{1:'mesh_not_ready',2:'restarting',4:'completion_pending',8:'access_busy',16:'composition_busy',32:'legacy_control_busy',64:'legacy_control_pending',128:'legacy_poll',256:'request_gap'},
+      detail:'SEND: response timeout in milliseconds. WAIT: remaining inter-request gap in milliseconds. SEND flags bit 0: device report probe.',events:[]};
+    q('#traceDownload').disabled=false;await watchCommandTrace();
+  }catch(error){traceStatus(error.message)}
+  finally{traceStarting=false;if(!commandTrace?.running)q('#traceStart').disabled=false}
+};
+q('#traceDownload').onclick=async()=>{
+  if(!commandTrace||traceSaving)return;
+  traceSaving=true;clearTimeout(traceTimer);q('#traceDownload').disabled=true;
+  const trace=commandTrace;let stopped=false;
+  try{
+    if(traceReadPromise)await traceReadPromise.catch(()=>{});
+    await tracePost(new URLSearchParams({action:'stop',id:String(trace.id)}));
+    stopped=true;trace.running=false;await readCommandTrace();trace.collection_stop_unconfirmed=false;
+  }catch(error){trace.last_read_failed=true;trace.collection_stop_unconfirmed=!stopped;traceStatus(error.message)}
+  finally{trace.running=false;traceSaving=false;q('#traceStart').disabled=false;q('#traceDownload').disabled=false}
+  const url=URL.createObjectURL(new Blob([JSON.stringify(trace,null,2)],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download='steinel-command-trace.json';
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+window.addEventListener('beforeunload',event=>{if(commandTrace?.running){event.preventDefault();event.returnValue=''}});
 function pollDevices(status){
   if(!devicePollPromise)devicePollPromise=readDevices(status).finally(()=>{devicePollPromise=null;scheduleControlPoll()});
   return devicePollPromise;

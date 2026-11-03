@@ -1,0 +1,440 @@
+{
+  "schema": "steinel-device-report/1",
+  "gateway_version": "2.0.1-rc.3",
+  "elapsed_ms": 88476,
+  "probe_complete": false,
+  "device": {
+    "label_model": "L 840 SC",
+    "identity_source": "imported_catalog",
+    "revision_source": "gateway_cache",
+    "company": 1379,
+    "product": 7806,
+    "firmware": "1.2.3",
+    "hardware": "",
+    "elements": [
+      {
+        "index": 0,
+        "capabilities": 51,
+        "bound": true
+      },
+      {
+        "index": 1,
+        "capabilities": 5,
+        "bound": true
+      },
+      {
+        "index": 2,
+        "capabilities": 8,
+        "bound": true
+      },
+      {
+        "index": 3,
+        "capabilities": 8,
+        "bound": true
+      }
+    ],
+    "composition": {
+      "length": 102,
+      "valid": true,
+      "truncated": false,
+      "raw": "63057e1e83089000030000000f0200000200001004100210061007100013011306120712001201120312041263050b1063050d100000050400100f13101301100512630501106305061063050410630505100000020100110111630503100000020000110111"
+    },
+    "models": {
+      "company": 1379,
+      "product": 7806,
+      "vid": 2179,
+      "crpl": 144,
+      "features": 3,
+      "elements": [
+        {
+          "index": 0,
+          "location": 0,
+          "sig_models": [
+            0,
+            2,
+            4096,
+            4100,
+            4098,
+            4102,
+            4103,
+            4864,
+            4865,
+            4614,
+            4615,
+            4608,
+            4609,
+            4611,
+            4612
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4107
+            },
+            {
+              "company": 1379,
+              "model": 4109
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "location": 0,
+          "sig_models": [
+            4096,
+            4879,
+            4880,
+            4097,
+            4613
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4097
+            },
+            {
+              "company": 1379,
+              "model": 4102
+            },
+            {
+              "company": 1379,
+              "model": 4100
+            },
+            {
+              "company": 1379,
+              "model": 4101
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "location": 0,
+          "sig_models": [
+            4352,
+            4353
+          ],
+          "vendor_models": [
+            {
+              "company": 1379,
+              "model": 4099
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "location": 0,
+          "sig_models": [
+            4352,
+            4353
+          ],
+          "vendor_models": []
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "sequence": 1,
+      "elapsed_ms": 4792,
+      "element": 0,
+      "event": 0,
+      "opcode": 32776,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 2,
+      "elapsed_ms": 7342,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 3,
+      "elapsed_ms": 8175,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 4,
+      "elapsed_ms": 9301,
+      "element": 0,
+      "event": 0,
+      "opcode": 33281,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 5,
+      "elapsed_ms": 10506,
+      "element": 0,
+      "event": 3,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 0,
+      "truncated": false,
+      "raw": ""
+    },
+    {
+      "sequence": 6,
+      "elapsed_ms": 10834,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 7,
+      "elapsed_ms": 22082,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 8,
+      "elapsed_ms": 28224,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 9,
+      "elapsed_ms": 38184,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 10,
+      "elapsed_ms": 42974,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 11,
+      "elapsed_ms": 48192,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409ffffff"
+    },
+    {
+      "sequence": 12,
+      "elapsed_ms": 50370,
+      "element": 0,
+      "event": 2,
+      "opcode": 33358,
+      "property": 0,
+      "error": 0,
+      "length": 2,
+      "truncated": false,
+      "raw": "ffff"
+    },
+    {
+      "sequence": 13,
+      "elapsed_ms": 56384,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 14,
+      "elapsed_ms": 66114,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 15,
+      "elapsed_ms": 66640,
+      "element": 0,
+      "event": 2,
+      "opcode": 33284,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 16,
+      "elapsed_ms": 68994,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409780500"
+    },
+    {
+      "sequence": 17,
+      "elapsed_ms": 70551,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409c80000"
+    },
+    {
+      "sequence": 18,
+      "elapsed_ms": 71051,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409640000"
+    },
+    {
+      "sequence": 19,
+      "elapsed_ms": 77174,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "00"
+    },
+    {
+      "sequence": 20,
+      "elapsed_ms": 78227,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    },
+    {
+      "sequence": 21,
+      "elapsed_ms": 80671,
+      "element": 1,
+      "event": 2,
+      "opcode": 33428,
+      "property": 0,
+      "error": 0,
+      "length": 1,
+      "truncated": false,
+      "raw": "01"
+    },
+    {
+      "sequence": 22,
+      "elapsed_ms": 88155,
+      "element": 3,
+      "event": 5,
+      "opcode": 82,
+      "property": 0,
+      "error": 0,
+      "length": 5,
+      "truncated": false,
+      "raw": "c409000000"
+    }
+  ],
+  "observations": [
+    {
+      "elapsed_ms": 0,
+      "condition": "baseline"
+    },
+    {
+      "elapsed_ms": 21727,
+      "condition": "light_on"
+    },
+    {
+      "elapsed_ms": 38019,
+      "condition": "light_on"
+    },
+    {
+      "elapsed_ms": 75258,
+      "condition": "light_off"
+    }
+  ],
+  "missed_events": 0,
+  "event_limit_reached": false,
+  "payload_encoding": "Raw Sensor/Descriptor buffers; generic/light replies contain decoded present values in little endian. Composition Data is page 0.",
+  "observation_clock": "Browser-relative milliseconds from collection start; packet times use the gateway clock.",
+  "event_types": [
+    "sent",
+    "send_error",
+    "response",
+    "request_failed",
+    "invalid",
+    "publication"
+  ],
+  "limits": {
+    "composition_bytes": 512,
+    "packet_bytes": 128,
+    "gateway_events": 8,
+    "report_events": 512,
+    "observations": 32
+  },
+  "last_read_failed": false,
+  "collection_stop_unconfirmed": false
+}

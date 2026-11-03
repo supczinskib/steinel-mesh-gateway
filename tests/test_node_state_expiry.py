@@ -146,9 +146,9 @@ int main() {
   test_now=400;s.on=1;s.value_seen[0]=s.last_seen=test_now;s.dirty=true;
   g.advance_nodes_(test_now);assert(mode.option=="Always On"&&actual.value&&!s.controls.has(5));
   test_now=500;s.controls.begin(0,0,test_now);s.dirty=true;
-  g.advance_nodes_(test_now);assert(output.option=="Off"&&actual.value&&s.on==1);
+  g.advance_nodes_(test_now);assert(output.option=="On"&&actual.value&&s.on==1);
   test_now=600;s.controls.ready(0,test_now);s.dirty=true;
-  g.advance_nodes_(test_now);assert(output.option=="Off"&&actual.value);
+  g.advance_nodes_(test_now);assert(output.option=="On"&&actual.value);
   test_now=60600;s.last_seen=test_now;s.dirty=true;
   g.advance_nodes_(test_now);assert(!s.controls.has(0)&&output.option=="On"&&actual.value);
   test_now=60700;s.controls.begin(2,1,test_now);s.dirty=true;

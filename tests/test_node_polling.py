@@ -18,8 +18,13 @@ harness = harness.replace("  void test_completion(uint32_t now);", r'''
   NodeRequest captured{};
   unsigned sync_calls{0};
   bool sync_node_functions_() { ++sync_calls; return false; }
-  bool send_node_request_(const NodeRequest &request) { sent=true; captured=request; return true; }
+  bool send_node_request_(const NodeRequest &request) {
+    if(request.kind==1 || (request.kind==2 && request.step==1))node_states_[request.node].value_poll_at[0]=millis();
+    sent=true;captured=request;return true;
+  }
   void poll_nodes_(uint32_t now);
+  bool poll_priority_(uint32_t now);
+  void dispatch_node_request_(const NodeRequest &, uint32_t);
   void test_completion(uint32_t now);
 ''')
 start = source.index("void SteinelMesh::poll_nodes_(")
@@ -64,6 +69,42 @@ int main() {
     s.supported=protocol::F_RUN_TIME;s.value_seen[4]=1;s.poll_step=RUN;s.verify_fields=16;
     night.poll_nodes_(test_now);
     assert(s.verify_fields==0 && (!night.sent || night.captured.kind!=RUN));
+  }
+  // Output recovery only uses confirmed Lightness on the physical output element.
+  for(unsigned scenario=0;scenario<4;++scenario) {
+    SteinelMesh fallback;fallback.catalog_.count=1;
+    auto &node=fallback.catalog_.nodes[0];node.selected=true;node.address=2;node.element_count=3;
+    node.elements[0].capabilities=protocol::ONOFF|protocol::LIGHTNESS;
+    node.elements[1].capabilities=protocol::LC;node.elements[2].capabilities=protocol::SENSOR;
+    auto &s=fallback.node_states_[0];s.composition_checked=s.composition_matches=true;
+    s.supported=protocol::F_OUTPUT|protocol::F_BRIGHTNESS;s.verify_fields=1;s.verify_attempts[0]=1;
+    if(scenario==1)node.nightmatiq=true;
+    if(scenario==2)s.supported=protocol::F_OUTPUT;
+    if(scenario==3) {
+      node.elements[0].capabilities=protocol::ONOFF;
+      node.elements[2].capabilities|=protocol::LIGHTNESS;
+    }
+    fallback.poll_nodes_(test_now);
+    assert(fallback.sent && fallback.captured.verification);
+    assert(fallback.captured.kind==(scenario==0?LEVEL:ON));
+    assert(fallback.captured.step==(scenario==0?OUTPUT_LIGHTNESS_READ:0));
+    assert(fallback.captured.element==0);
+  }
+  {
+    SteinelMesh fallback;fallback.catalog_.count=1;
+    const uint32_t previous_now=test_now;test_now=50000;
+    auto &node=fallback.catalog_.nodes[0];node.selected=true;node.address=2;node.element_count=1;
+    node.elements[0].capabilities=protocol::ONOFF|protocol::LIGHTNESS;
+    auto &s=fallback.node_states_[0];s.composition_checked=s.composition_matches=true;
+    s.supported=protocol::F_OUTPUT|protocol::F_BRIGHTNESS;s.discovery_complete=true;
+    s.last_seen=test_now;s.output_failures=1;s.output_lightness_next=true;
+    assert(fallback.poll_priority_(test_now));
+    assert(fallback.captured.kind==ON); // A single missed periodic read keeps its normal route.
+    s.value_poll_at[0]=0;s.output_failures=6;
+    assert(fallback.poll_priority_(test_now));
+    assert(fallback.captured.kind==LEVEL && fallback.captured.step==OUTPUT_LIGHTNESS_READ);
+    assert(s.value_poll_at[0]==test_now);
+    test_now=previous_now;
   }
   // Offline nodes must not hold back entity registration for responding devices.
   SteinelMesh discovery;discovery.catalog_.count=16;

@@ -8,7 +8,7 @@
 Steinel devices <-> Bluetooth Mesh <-> ESP32-C3 gateway -> Home Assistant
 ```
 
-A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.0** supports multiple devices from one network.
+A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.1** supports multiple devices from one network.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -129,7 +129,7 @@ Compatibility depends on the actual models and firmware, not the commercial name
 
 All entries require a valid Connect network backup, Company ID `0x0563`, supported models bound to the imported AppKey, and the limits below. Older proprietary Bluetooth firmware, ordinary non-connected variants, Z-Wave/KNX/DALI-only products and client-only buttons are not covered. Mesh conversion can be irreversible and affect compatibility with older devices; consult [Steinel's Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) before updating a lamp.
 
-See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.0 release description](docs/releases/v2.0.0.md).
+See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.1 release description](docs/releases/v2.0.1.md).
 
 ## Device identity and discovery
 
@@ -139,14 +139,16 @@ Details include the model, manufacturer, Company/Product IDs and supported Mesh 
 
 The main device list contains Steinel devices. Entries without a manufacturer identifier appear separately under **Unrecognized devices**; devices identified as another manufacturer are excluded. After import, cloud sign-in and local backup import collapse under **Change or reimport network** and remain available for later configuration changes.
 
-Requested settings appear immediately in the web interface and Home Assistant while confirmation runs in the background. Actual output and sensor readings come from device responses, not inferred values. Output readback has priority after a control change and is retried without waiting for the next regular polling cycle. NightmatIQ Plus exposes its operating mode, twilight threshold, illuminance and actual output, without brightness or motion run-time controls.
+Requested settings appear immediately in the web interface while confirmation runs in the background. In Home Assistant, **Output** reports the state received from the device; queuing a command does not change it. Other requested settings appear immediately while awaiting confirmation. Output and sensor readings are not inferred from commands. Output readback has priority after a control change and is retried without waiting for the next regular polling cycle. NightmatIQ Plus exposes its operating mode, twilight threshold, illuminance and actual output, without brightness or motion run-time controls.
+
+Outputs have a separate refresh schedule with a base interval of 2 seconds, scaled to the number of outputs and measured response times. An isolated missing reply is retried promptly; repeated failures of that output increase its retry interval. Traffic and freshness of other values can extend these intervals; they are not guaranteed maximum delays. A present Lightness Actual value from the same output also updates its OnOff state, without treating the transition target as the current state. Diagnostic replies from selected devices update their normal states while the report is collected.
 
 ## Limits and memory
 
 - One network, one NetKey/AppKey pair, up to **16 imported devices**, **8 elements per device** and **16 distinct sensor publication groups**.
 - Models requiring a different AppKey are not exposed for control.
 - A bounded 16-entry queue coalesces unsent changes; one slot is reserved for a transaction continuation/retry.
-- One acknowledged transaction at a time; addressed replies and property IDs are checked. Writes have a bounded retry using the same TID.
+- One acknowledged read at a time; addressed replies and property IDs are checked. Control writes do not wait for acknowledgements. Repetitions are bounded and preserve the TID where defined by the model. Separate reads verify actual device state.
 - Background polls are generated incrementally, rather than stored as a full per-device queue.
 - A 512-byte flash reader parses backups without keeping the complete JSON in RAM.
 - The backup workspace is the **inactive OTA partition**. Its previous image is overwritten by an import and the scratch backup is erased after processing.
@@ -161,6 +163,8 @@ The web diagnostics show free internal RAM and the largest free block during ope
 Device details include up to eight raw Sensor properties, separated by element, with data age and truncation indicators. A disabled-by-default **Sensor diagnostics** text entity exposes the same bounded snapshot in HA. These readings are not written to flash.
 
 To report another device, open its details and choose **Prepare device report**. Enter the model from the label, start collection and optionally mark observations such as a covered light sensor or motion. **Download report** stops collection and saves one JSON file for attaching to an issue. Collection lasts up to three minutes, uses read-only probes and also works for imported devices not selected in HA. The report omits keys, credentials, private names, UUIDs and network addresses. It includes Composition Data, SIG/vendor model IDs, raw replies, failures and explicit truncation/missing-event indicators. The gateway keeps one bounded RAM session; the browser holds the history, so leave the page open. If the gateway disconnects, the collected data can still be downloaded and the report marks the unconfirmed stop or failed final read.
+
+For command delays, open **Mesh network > Gateway diagnostics > Command trace**. Start a passive capture, reproduce the behaviour, then choose **STOP AND DOWNLOAD TRACE**. It records commands, queue waits, Bluetooth SDK calls and replies for up to three minutes without sending additional Mesh requests. Recording is off by default; the gateway uses a fixed buffer of at most 2 KiB and the browser keeps the history. The export identifies missing events. An SDK call or a successful return does not confirm radio transmission or physical switching.
 
 ## Security
 

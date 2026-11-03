@@ -5,7 +5,7 @@
     "mesh_ready": true,
     "busy": false,
     "message": "Mesh client ready; polling selected devices",
-    "gateway_version": "2.0.0",
+    "gateway_version": "2.0.1",
     "runtime_mode": "Bluetooth Mesh",
     "network": "Home",
     "local_address": "146C",

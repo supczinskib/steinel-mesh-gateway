@@ -1,0 +1,25 @@
+{
+  "source": "https://github.com/user-attachments/files/33980874/063fa6e8-b5b0-4cc2-9471-767e509092e5.json",
+  "source_sha256": "c570bf5bb59c4c4ca517c8693fe74c844469922eec5618ad41f70fb30d9388bf",
+  "condition": {
+    "condition": "state",
+    "entity_id": "select.l_840_c_e16dfc_output",
+    "state": [
+      "Off"
+    ]
+  },
+  "action": {
+    "action": "select.select_option",
+    "metadata": {},
+    "target": {
+      "entity_id": [
+        "select.l_840_sc_181b_output",
+        "select.l_840_c_e16dfc_output",
+        "select.l_840_sc_aca3a1_output"
+      ]
+    },
+    "data": {
+      "option": "On"
+    }
+  }
+}
