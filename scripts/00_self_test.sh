@@ -35,7 +35,7 @@ for path in \
   "$ROOT_DIR/README_FR.md" \
   "$ROOT_DIR/CHANGELOG.md" \
   "$ROOT_DIR/docs/DEVICE_COMPATIBILITY.md" \
-  "$ROOT_DIR/docs/releases/v2.0.1.md" \
+  "$ROOT_DIR/docs/releases/v2.0.2.md" \
   "$CONFIG" \
   "$ROOT_DIR/esphome/components/steinel_mesh/__init__.py" \
   "$ROOT_DIR/esphome/components/steinel_mesh/steinel_mesh.h" \
@@ -58,8 +58,8 @@ for path in \
 done
 
 for marker in \
-  'project_version: "2.0.1"' \
-  '## 2.0.1'; do
+  'project_version: "2.0.2"' \
+  '## 2.0.2'; do
   if grep -Fq "$marker" "$CONFIG" "$ROOT_DIR/CHANGELOG.md"; then
     ok "release marker: $marker"
   else

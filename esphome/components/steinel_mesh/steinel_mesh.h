@@ -327,6 +327,11 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   std::mutex node_mutex_;
   uint8_t node_queue_count_{0};
   NodeRequest active_node_request_{};
+  NodeRequest node_write_request_{};
+  uint16_t node_write_destination_{0};
+  bool node_write_pending_{false}, node_write_success_{false};
+  uint32_t node_send_at_{0};
+  std::atomic<bool> node_read_obsolete_{false};
   std::atomic<uint16_t> node_destination_{0};
   std::atomic<uint32_t> node_expected_status_{0};
   std::atomic<uint16_t> node_expected_property_{0};
@@ -359,6 +364,8 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   void poll_nodes_(uint32_t now);
   bool node_response_value_matches_(const esp_ble_mesh_client_common_param_t *params,
                                     uint32_t received, uint32_t value) const;
+  bool consume_prewrite_reply_(const esp_ble_mesh_client_common_param_t *params,
+                               uint32_t received, bool valid, uint16_t property = 0);
   std::array<uint8_t, 3> node_property_storage_{};
   net_buf_simple node_property_buffer_{};
   CloudBody *upload_body_{nullptr};

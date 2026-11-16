@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "esphome/components/steinel_mesh/steinel_nodes.cpp").read_text()
 START = SOURCE.index("bool SteinelMesh::queue_node_command(")
 END = SOURCE.index("bool SteinelMesh::send_node_request_(", START)
-COMPLETION_START = SOURCE.index("  if (this->node_completion_pending_.exchange(false))")
-COMPLETION_END = SOURCE.index("  if (!this->mesh_ready_.load()", COMPLETION_START)
+COMPLETION_START = SOURCE.index("  for (uint8_t completed = 0; completed < 2; ++completed) {")
+COMPLETION_END = SOURCE.index("  bool queued_write;", COMPLETION_START)
 COMPLETION = "\nvoid SteinelMesh::test_completion(uint32_t now) {\n" + SOURCE[COMPLETION_START:COMPLETION_END] + "\n}\n"
 REQUESTS = SOURCE[SOURCE.index("enum Request :"):SOURCE.index("template<class Base>")]
 HARNESS = r'''
@@ -48,6 +48,11 @@ class SteinelMesh {
   uint8_t node_write_burst_{0};
   uint32_t node_next_request_at_{0};
   std::atomic<bool> node_completion_pending_{false}, node_completion_success_{false};
+  NodeRequest node_write_request_{};
+  uint16_t node_write_destination_{0};
+  bool node_write_pending_{false}, node_write_success_{false};
+  uint32_t node_send_at_{0};
+  std::atomic<bool> node_read_obsolete_{false};
   NodeRequest active_node_request_{};
   std::mutex node_mutex_;
   uint8_t next_tid_() { return tid_++; }

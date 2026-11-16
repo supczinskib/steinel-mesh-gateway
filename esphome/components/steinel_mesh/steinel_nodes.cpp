@@ -460,6 +460,8 @@ bool SteinelMesh::queue_node_command(uint16_t address, NodeCommand command, uint
 
 bool SteinelMesh::send_node_request_(const NodeRequest &request) {
   if (request.node >= this->catalog_.count || !this->mesh_ready_.load() || this->reboot_pending_.load()) return false;
+  const bool writing = is_write(request.kind);
+  if (writing && this->node_write_pending_) return false;
   const auto &node = this->catalog_.nodes[request.node];
   if (request.element >= node.element_count ||
       (request.diagnostic ? !this->diagnostic_request_allowed_(request) : !node.selected)) return false;
@@ -554,21 +556,38 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
       property = (request.kind == THRESHOLD || request.kind == SET_THRESHOLD) ? THRESHOLD_PROPERTY : RUN_PROPERTY;
       params.opcode = is_write(request.kind) ? ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET_UNACK : ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_GET;
       light_get.lc_property_get.property_id = property;
-      this->node_property_storage_ = {uint8_t(request.value), uint8_t(request.value >> 8), uint8_t(request.value >> 16)};
-      this->node_property_buffer_.data = this->node_property_storage_.data();
-      this->node_property_buffer_.__buf = this->node_property_storage_.data();
-      this->node_property_buffer_.size = 3; this->node_property_buffer_.len = 3;
-      light_set.lc_property_set.property_id = property;
-      light_set.lc_property_set.property_value = &this->node_property_buffer_;
+      if (writing) {
+        this->node_property_storage_ = {uint8_t(request.value), uint8_t(request.value >> 8), uint8_t(request.value >> 16)};
+        this->node_property_buffer_.data = this->node_property_storage_.data();
+        this->node_property_buffer_.__buf = this->node_property_storage_.data();
+        this->node_property_buffer_.size = 3; this->node_property_buffer_.len = 3;
+        light_set.lc_property_set.property_id = property;
+        light_set.lc_property_set.property_value = &this->node_property_buffer_;
+      }
       status = ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_STATUS; break;
   }
   }
-  if (!this->begin_access_operation_(AccessOperation::NODE, params.opcode)) return false;
-  this->access_deadline_.store(millis() + params.msg_timeout + 750);
-  this->active_node_request_ = request;
-  this->node_destination_.store(params.ctx.addr);
-  this->node_expected_status_.store(status);
-  this->node_expected_property_.store(property);
+  if (writing) {
+    this->node_write_request_ = request;
+    this->node_write_destination_ = params.ctx.addr;
+    std::lock_guard<std::mutex> lock(this->node_mutex_);
+    if (this->access_operation_.load() == AccessOperation::NODE &&
+        this->active_node_request_.node == request.node) {
+      const uint8_t read = this->active_node_request_.kind;
+      if ((output_control(request.kind) && (read == ON || read == LEVEL || read == AUTO)) ||
+          (request.kind == SET_THRESHOLD && read == THRESHOLD) ||
+          (request.kind == SET_RUN && read == RUN))
+        this->node_read_obsolete_.store(true);
+    }
+  } else {
+    if (!this->begin_access_operation_(AccessOperation::NODE, params.opcode)) return false;
+    this->access_deadline_.store(millis() + params.msg_timeout + 750);
+    this->active_node_request_ = request;
+    this->node_read_obsolete_.store(false);
+    this->node_destination_.store(params.ctx.addr);
+    this->node_expected_status_.store(status);
+    this->node_expected_property_.store(property);
+  }
   if (output_read(request.kind, request.step)) {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     this->node_states_[request.node].value_poll_at[0] = millis();
@@ -610,7 +629,9 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
   else
     result = !is_write(request.kind) ? esp_ble_mesh_light_client_get_state(&params, &light_get) :
                                     esp_ble_mesh_light_client_set_state(&params, &light_set);
-  const bool accepted = this->record_access_send_result_(AccessOperation::NODE, params.opcode, result);
+  this->node_send_at_ = millis() + 200;
+  const bool accepted = writing ? this->record_send_result_(result) :
+      this->record_access_send_result_(AccessOperation::NODE, params.opcode, result);
   {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     const auto &state = this->node_states_[request.node];
@@ -630,16 +651,11 @@ bool SteinelMesh::send_node_request_(const NodeRequest &request) {
     this->record_diagnostic_(params.ctx.addr, accepted ? protocol::DeviceDiagnostics::SENT :
                             protocol::DeviceDiagnostics::SEND_ERROR, params.opcode,
                             request.kind == SENSOR_PROPERTY ? request.value : property, nullptr, 0, result);
-  if (!accepted) this->finish_node_request_(false);
-  else if (params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_MODE_SET_UNACK ||
-           params.opcode == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK ||
-           params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK ||
-           params.opcode == ESP_BLE_MESH_MODEL_OP_LIGHT_LC_PROPERTY_SET_UNACK ||
-           params.opcode == ESP_BLE_MESH_MODEL_OP_SCENE_RECALL_UNACK) {
-    // Complete only the send stage. No device state is inferred from SDK acceptance.
-    this->finish_node_request_(true);
-    this->complete_access_operation_(params.opcode, true);
-  }
+  // Write progress never takes ownership of the outstanding acknowledged read.
+  if (writing) {
+    this->node_write_success_ = accepted;
+    this->node_write_pending_ = true;
+  } else if (!accepted) this->finish_node_request_(false);
   return accepted;
 }
 
@@ -684,6 +700,26 @@ bool SteinelMesh::node_response_value_matches_(const esp_ble_mesh_client_common_
   return value == request.value;
 }
 
+bool SteinelMesh::consume_prewrite_reply_(const esp_ble_mesh_client_common_param_t *params,
+                                          uint32_t received, bool valid, uint16_t property) {
+  if (!valid || params == nullptr || !this->node_read_obsolete_.load()) return false;
+  std::lock_guard<std::mutex> lock(this->node_mutex_);
+  if (this->access_operation_.load() != AccessOperation::NODE ||
+      !protocol::matching_reply(this->node_destination_.load(), this->access_opcode_.load(),
+          this->node_expected_status_.load(), this->node_expected_property_.load(),
+          params->ctx.addr, params->opcode, received, property, true)) return false;
+  auto &state = this->node_states_[this->active_node_request_.node];
+  this->state_trace_.record(millis(), this->catalog_.nodes[this->active_node_request_.node].address,
+      params->ctx.addr, protocol::StateTrace::RESPONSE, received, params->opcode, 0,
+      this->active_node_request_.kind, 0, 0, state.on, state.automatic, state.on, state.automatic,
+      nullptr, 0, 0, this->node_queue_count_, 0, protocol::StateTrace::OBSOLETE_READ, property);
+  // A pre-write reading can finish its GET and prove availability, but cannot
+  // confirm a command sent after that GET began.
+  state.last_seen = millis(); state.failures = 0; state.retry_at = 0; state.dirty = true;
+  this->mesh_rx_messages_.fetch_add(1); this->record_mesh_rssi_(params->ctx);
+  return this->node_event_(params, received, true, property);
+}
+
 bool SteinelMesh::node_generic_event_(esp_ble_mesh_generic_client_cb_event_t event,
                                         esp_ble_mesh_generic_client_cb_param_t *param) {
   if (!this->catalog_valid_ || param->params == nullptr) return false;
@@ -697,6 +733,7 @@ bool SteinelMesh::node_generic_event_(esp_ble_mesh_generic_client_cb_event_t eve
                             param->params->ctx.recv_op, 0, &value, 1);
   }
   if (this->diagnostic_reply_(param->params, param->params->ctx.recv_op, success)) return true;
+  if (this->consume_prewrite_reply_(param->params, param->params->ctx.recv_op, success)) return true;
   std::lock_guard<std::mutex> lock(this->node_mutex_);
   for (size_t i = 0; i < this->catalog_.count; ++i) {
     const auto &node = this->catalog_.nodes[i];
@@ -775,6 +812,7 @@ bool SteinelMesh::node_light_event_(esp_ble_mesh_light_client_cb_event_t event,
                                        received, property, bytes, length);
   }
   if (this->diagnostic_reply_(param->params, received, valid, property)) return true;
+  if (this->consume_prewrite_reply_(param->params, received, valid, property)) return true;
   std::lock_guard<std::mutex> lock(this->node_mutex_);
   for (size_t i = 0; i < this->catalog_.count; ++i) {
     const auto &node = this->catalog_.nodes[i];
@@ -1140,14 +1178,18 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
       else entities->motion->invalidate_state();
     }
   }
-  if (this->node_completion_pending_.exchange(false)) {
-    const bool success = this->node_completion_success_.load();
-    auto request = this->active_node_request_;
+  for (uint8_t completed = 0; completed < 2; ++completed) {
+    const bool writing = completed == 1;
+    if (writing ? !this->node_write_pending_ : !this->node_completion_pending_.exchange(false)) continue;
+    const bool success = writing ? this->node_write_success_ : this->node_completion_success_.load();
+    auto request = writing ? this->node_write_request_ : this->active_node_request_;
+    const uint16_t destination = writing ? this->node_write_destination_ : this->node_destination_.load();
+    if (writing) this->node_write_pending_ = false;
     {
       std::lock_guard<std::mutex> lock(this->node_mutex_);
       const auto &node = this->catalog_.nodes[request.node];
       const auto &state = this->node_states_[request.node];
-      this->state_trace_.record(now, node.address, this->node_destination_.load(), protocol::StateTrace::COMPLETED,
+      this->state_trace_.record(now, node.address, destination, protocol::StateTrace::COMPLETED,
           0, 0, 0, request.kind, request.step, request.tid,
           state.on, state.automatic, state.on, state.automatic, nullptr, 0, success ? 0 : -1,
           this->node_queue_count_, request.attempts);
@@ -1161,7 +1203,7 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
         state.output_rtt_ms = std::min<uint32_t>(now - state.value_poll_at[0], POLL_INTERVAL);
     }
     if (request.diagnostic) {
-      if (!success) this->record_diagnostic_(this->node_destination_.load(), protocol::DeviceDiagnostics::TIMEOUT,
+      if (!success) this->record_diagnostic_(destination, protocol::DeviceDiagnostics::TIMEOUT,
                                             this->node_expected_status_.load());
       std::lock_guard<std::mutex> lock(this->node_mutex_);
       this->device_diagnostics_.next_probe = now + 1500;
@@ -1251,30 +1293,37 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
       }
     }
     }
-    this->node_next_request_at_ = now + 200;
+    if (!writing) this->node_next_request_at_ = now + 200;
   }
+  bool queued_write;
+  { std::lock_guard<std::mutex> lock(this->node_mutex_); queued_write = this->node_queue_count_ != 0; }
+  const auto operation = this->access_operation_.load();
+  const bool read_busy = operation != AccessOperation::NONE;
+  const bool write_allowed = queued_write && (operation == AccessOperation::NONE ||
+      (operation == AccessOperation::NODE && this->active_node_request_.kind != COMPOSITION));
+  const uint32_t dispatch_at = write_allowed ? this->node_send_at_ : this->node_next_request_at_;
   if (!this->mesh_ready_.load() || this->reboot_pending_.load() || this->node_completion_pending_.load() ||
-      this->access_operation_.load() != AccessOperation::NONE ||
+      (read_busy && !write_allowed) ||
       this->composition_query_in_flight_.load() || this->control_kind_ != ControlKind::NONE ||
       this->control_request_pending_() || this->poll_stage_ != 0 ||
-      protocol::deadline_pending(now, this->node_next_request_at_)) {
+      protocol::deadline_pending(now, dispatch_at)) {
     std::lock_guard<std::mutex> lock(this->node_mutex_);
     if (this->state_trace_.active(now) && this->node_queue_count_ != 0) {
       using Trace = protocol::StateTrace;
       const uint16_t flags = (!this->mesh_ready_.load() ? Trace::NOT_READY : 0) |
           (this->reboot_pending_.load() ? Trace::RESTARTING : 0) |
           (this->node_completion_pending_.load() ? Trace::COMPLETION_PENDING : 0) |
-          (this->access_operation_.load() != AccessOperation::NONE ? Trace::ACCESS_BUSY : 0) |
+          (read_busy && !write_allowed ? Trace::ACCESS_BUSY : 0) |
           (this->composition_query_in_flight_.load() ? Trace::COMPOSITION_BUSY : 0) |
           (this->control_kind_ != ControlKind::NONE ? Trace::CONTROL_BUSY : 0) |
           (this->control_request_pending_() ? Trace::CONTROL_PENDING : 0) |
           (this->poll_stage_ != 0 ? Trace::LEGACY_POLL : 0) |
-          (protocol::deadline_pending(now, this->node_next_request_at_) ? Trace::REQUEST_GAP : 0);
+          (protocol::deadline_pending(now, dispatch_at) ? Trace::REQUEST_GAP : 0);
       this->state_trace_.wait(now, this->node_queue_count_, flags,
           flags & Trace::ACCESS_BUSY ? this->node_destination_.load() : 0,
           flags & Trace::ACCESS_BUSY ? this->access_opcode_.load() : 0,
-          protocol::deadline_pending(now, this->node_next_request_at_) ?
-          this->node_next_request_at_ - now : 0);
+          protocol::deadline_pending(now, dispatch_at) ?
+          dispatch_at - now : 0);
     }
     return;
   }
@@ -1304,7 +1353,7 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
   }
   // Finish bounded repetitions within the transaction window; sustained fresh
   // commands still yield polling slots through the burst limit.
-  if (this->node_write_burst_ >= burst_limit && !continuation && !repetitions_only) {
+  if (!read_busy && this->node_write_burst_ >= burst_limit && !continuation && !repetitions_only) {
     this->node_write_burst_ = 0;
     this->poll_nodes_(now);
     if (this->access_operation_.load() != AccessOperation::NONE || this->node_completion_pending_.load() ||
@@ -1332,13 +1381,13 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
             return item.node == request.node && (item.kind == SET_MODE || item.kind == SET_ON ||
                 item.kind == SET_LEVEL || item.kind == SET_AUTO);
           });
-      if (!this->node_completion_pending_.load() && state.mode.writing && !mode_write_queued) {
+      if (!this->node_write_pending_ && state.mode.writing && !mode_write_queued) {
         // Admission can change before dispatch. A rejected command must not
         // leave future authenticated readings blocked as an unfinished write.
         state.mode.finish_write(millis());
         state.poll_step = 0; state.poll_at = millis() + 300; state.force_poll = true;
       }
-      if (!this->node_completion_pending_.load() && is_write(request.kind)) {
+      if (!this->node_write_pending_ && is_write(request.kind)) {
         const size_t field = command_field(request.kind);
         const bool newer_queued = std::any_of(this->node_queue_.begin(),
             this->node_queue_.begin() + this->node_queue_count_, [&](const auto &item) {
@@ -1352,6 +1401,9 @@ void SteinelMesh::advance_nodes_(uint32_t now) {
     }
     return;
   }
+  if (this->access_operation_.load() != AccessOperation::NONE ||
+      protocol::deadline_pending(now, this->node_next_request_at_) ||
+      protocol::deadline_pending(now, this->node_send_at_)) return;
   this->node_write_burst_ = 0;
   bool verifying = false;
   { std::lock_guard<std::mutex> lock(this->node_mutex_);

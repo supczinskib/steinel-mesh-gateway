@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 poll = runpy.run_path(str(ROOT / "tests/test_node_polling.py"))
 source = poll["source"]
 start = source.index("void SteinelMesh::advance_nodes_(uint32_t now) {")
-end = source.index("  if (this->node_completion_pending_.exchange(false))", start)
+end = source.index("  for (uint8_t completed = 0; completed < 2; ++completed) {", start)
 method = source[start:end] + "}\n"
 entities = r'''
   struct TestEntity {

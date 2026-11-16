@@ -35,7 +35,7 @@ def run():
         assert actual == reference, f"Compatibility model list differs in {name}"
     for name in ["README.md", "README_PL.md", "README_DE.md", "README_FR.md"]:
         assert "docs/DEVICE_COMPATIBILITY.md" in documents[name]
-        assert "docs/releases/v2.0.1.md" in documents[name]
+        assert "docs/releases/v2.0.2.md" in documents[name]
         assert "esphome compile esphome/steinel-c3.yaml" in documents[name], name
         assert "esphome/components/steinel_mesh/" in documents[name], name
         assert "esphome/nightmatiq-c3.yaml" not in documents[name], name

@@ -8,7 +8,7 @@
 Appareils Steinel <-> Bluetooth Mesh <-> Passerelle ESP32-C3 -> Home Assistant
 ```
 
-Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.1** prend en charge plusieurs appareils d’un même réseau.
+Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.2** prend en charge plusieurs appareils d’un même réseau.
 
 Auteur et responsable : **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -129,7 +129,7 @@ La compatibilité dépend des modèles réels et du micrologiciel, pas uniquemen
 
 Chaque entrée exige une sauvegarde valide du réseau Connect, Company ID `0x0563`, des modèles pris en charge associés à l’AppKey importée et le respect des limites ci-dessous. Les anciennes versions Bluetooth propriétaires, variantes non connectées, produits uniquement Z-Wave/KNX/DALI et boutons uniquement clients ne sont pas inclus. La conversion Mesh peut être irréversible et modifier la compatibilité avec les anciens appareils ; consulter la [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) avant une mise à jour.
 
-Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.1](docs/releases/v2.0.1.md).
+Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.2](docs/releases/v2.0.2.md).
 
 ## Identité et découverte des fonctions
 
@@ -148,7 +148,7 @@ Les sorties disposent d’un calendrier d’interrogation distinct avec un inter
 - Un réseau et une paire NetKey/AppKey, jusqu’à **16 appareils importés**, **8 éléments par appareil** et **16 groupes de publication des capteurs**.
 - Les modèles utilisant une autre AppKey ne sont pas exposés pour les commandes.
 - Une file de 16 entrées regroupe les modifications non envoyées ; une entrée est réservée à la poursuite ou au réessai d’une transaction.
-- Une lecture avec réponse à la fois ; vérification de l’adresse, de l’opcode et de la propriété. Les commandes n’attendent pas d’acquittement. Les répétitions sont limitées et conservent le TID lorsque le modèle le définit. Des lectures séparées vérifient l’état réel de l’appareil.
+- Une lecture avec réponse à la fois ; vérification de l’adresse, de l’opcode et de la propriété. Les commandes n’attendent pas d’acquittement et peuvent être envoyées pendant qu’une lecture d’état attend sa réponse. Les répétitions sont limitées et conservent le TID lorsque le modèle le définit. Des lectures séparées vérifient l’état réel de l’appareil.
 - Les interrogations sont produites progressivement, sans stocker une file complète par appareil.
 - Un tampon de lecture flash de 512 octets évite de conserver tout le JSON en RAM.
 - La sauvegarde est placée temporairement dans la **partition OTA inactive**. L’importation remplace son ancienne image ; la copie de travail est ensuite effacée.

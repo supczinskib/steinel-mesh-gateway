@@ -190,9 +190,10 @@ class Network {
     transmit_sdk();return;
 #endif
     const auto p=wire_request;const auto payload=wire_payload;
-    const auto req=gateway.active_node_request_;const unsigned i=req.node;
+    unsigned i=0;
+    while(i<3 && (p.ctx.addr<lamps[i].address || p.ctx.addr>=lamps[i].address+lamps[i].models.size()))++i;
     assert(i<3);++attempts;log("tx",i,p.opcode,payload.empty()?-1:payload[0]);
-    if(is_write(req.kind)&&first_send[i]==UNSEEN)first_send[i]=test_now-BASE;
+    if((p.opcode==0x8293||p.opcode==0x8203||p.opcode==0x824d||p.opcode==0x63)&&first_send[i]==UNSEEN)first_send[i]=test_now-BASE;
     const bool unack=p.opcode==0x8293||p.opcode==0x8203||p.opcode==0x824d||p.opcode==0x63;
     const auto token=attempts;
     auto answered=std::make_shared<bool>(false);
@@ -225,9 +226,10 @@ class Network {
 #ifdef L840_REAL_SDK
   void transmit_sdk() {
     const auto p=wire_request;const auto payload=wire_payload;
-    const unsigned i=gateway.active_node_request_.node;
+    unsigned i=0;
+    while(i<3 && (p.ctx.addr<lamps[i].address || p.ctx.addr>=lamps[i].address+lamps[i].models.size()))++i;
     assert(i<3);++attempts;log("sdk_submit",i,p.opcode,payload.empty()?-1:payload[0]);
-    if(is_write(gateway.active_node_request_.kind)&&first_send[i]==UNSEEN)first_send[i]=test_now-BASE;
+    if((p.opcode==0x8293||p.opcode==0x8203||p.opcode==0x824d||p.opcode==0x63)&&first_send[i]==UNSEEN)first_send[i]=test_now-BASE;
     const bool unack=p.opcode==0x8293||p.opcode==0x8203||p.opcode==0x824d||p.opcode==0x63;
     QueuedPacket packet{};
     const int error=sdk.submit(test_now,p.ctx.addr,p.opcode,p.msg_timeout,payload.size(),!unack,packet);

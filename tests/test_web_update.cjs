@@ -92,6 +92,7 @@ async function boot(release, installedVersion = '1.9.2') {
     ['2.0.1-rc.1', '2.0.2', true],
     ['2.0.1', '2.0.1', false],
     ['2.0.2-rc.1', '2.0.1', false],
+    ['2.0.2-rc.1', '2.0.2', true],
   ]) {
     const nextAsset = {...asset, name:`${assetPrefix}${latest}-ota.bin`,
       browser_download_url:`${downloadPrefix}${latest}/${assetPrefix}${latest}-ota.bin`};

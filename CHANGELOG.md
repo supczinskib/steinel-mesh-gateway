@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.0.2 - 2026-11-16
+
+- Dispatch unacknowledged controls while a state GET is awaiting a reply, with independent read and write completions and bounded send spacing.
+- Keep pre-write state replies from confirming a newer control intent; preserve read correlation, availability, transaction IDs and command continuations.
+- Keep LC property payload storage separate from GET construction and retain Mesh radio traffic priority during paced writes.
+
 ## 2.0.1 — 2026-11-03
 
 - Send On/Off, brightness, automatic-control and LC-property writes without waiting for acknowledgements, with one bounded repetition and separate state verification.

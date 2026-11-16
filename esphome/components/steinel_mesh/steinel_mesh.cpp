@@ -2198,7 +2198,8 @@ void SteinelMesh::update_radio_coexistence_() {
   if (this->mesh_started_) {
     const bool transmitting = !this->mesh_ready_.load() ||
         this->access_operation_.load() != AccessOperation::NONE ||
-        this->control_kind_ != ControlKind::NONE || this->node_completion_pending_.load();
+        this->control_kind_ != ControlKind::NONE || this->node_completion_pending_.load() ||
+        this->node_write_pending_ || protocol::deadline_pending(millis(), this->node_send_at_);
     status = transmitting ? ESP_COEX_BLE_ST_MESH_TRAFFIC : ESP_COEX_BLE_ST_MESH_STANDBY;
   }
   if (status == this->radio_coexistence_status_) return;

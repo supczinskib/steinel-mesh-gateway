@@ -42,6 +42,7 @@ class SteinelMesh {
  public:
   protocol::DeviceDiagnostics device_diagnostics_{};
   protocol::StateTrace state_trace_{};
+  uint8_t node_queue_count_{0};
   template<class P>bool diagnostic_reply_(const P*,uint32_t,bool,uint16_t=0){return false;}
   void record_diagnostic_(uint16_t,protocol::DeviceDiagnostics::Event,uint32_t,uint16_t=0,const uint8_t * =nullptr,size_t=0,int32_t=0){}
   enum class AccessOperation { NONE, NODE };
@@ -57,10 +58,12 @@ class SteinelMesh {
   std::atomic<AccessOperation> access_operation_{AccessOperation::NONE};
   std::atomic<uint16_t> node_destination_{10},node_expected_property_{0};
   std::atomic<uint32_t> access_opcode_{0},node_expected_status_{0},mesh_rx_messages_{0},mesh_generic_rx_{0},mesh_timeouts_{0};
+  std::atomic<bool> node_read_obsolete_{false};
   NodeRequest active_node_request_{};
   template<class T>void record_mesh_rssi_(const T&){}
   void finish_node_request_(bool success){completed=true;last_success=success;}
   void complete_access_operation_(uint32_t,bool){access_operation_=AccessOperation::NONE;}
+  bool consume_prewrite_reply_(const esp_ble_mesh_client_common_param_t *,uint32_t,bool,uint16_t=0);
   bool node_event_(const esp_ble_mesh_client_common_param_t*,uint32_t,bool,uint16_t=0);
   bool node_response_value_matches_(const esp_ble_mesh_client_common_param_t*,uint32_t,uint32_t)const;
   bool node_generic_event_(int,esp_ble_mesh_generic_client_cb_param_t*);

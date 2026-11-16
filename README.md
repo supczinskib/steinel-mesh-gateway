@@ -8,7 +8,7 @@
 Steinel devices <-> Bluetooth Mesh <-> ESP32-C3 gateway -> Home Assistant
 ```
 
-A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.1** supports multiple devices from one network.
+A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.2** supports multiple devices from one network.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -129,7 +129,7 @@ Compatibility depends on the actual models and firmware, not the commercial name
 
 All entries require a valid Connect network backup, Company ID `0x0563`, supported models bound to the imported AppKey, and the limits below. Older proprietary Bluetooth firmware, ordinary non-connected variants, Z-Wave/KNX/DALI-only products and client-only buttons are not covered. Mesh conversion can be irreversible and affect compatibility with older devices; consult [Steinel's Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) before updating a lamp.
 
-See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.1 release description](docs/releases/v2.0.1.md).
+See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.2 release description](docs/releases/v2.0.2.md).
 
 ## Device identity and discovery
 
@@ -148,7 +148,7 @@ Outputs have a separate refresh schedule with a base interval of 2 seconds, scal
 - One network, one NetKey/AppKey pair, up to **16 imported devices**, **8 elements per device** and **16 distinct sensor publication groups**.
 - Models requiring a different AppKey are not exposed for control.
 - A bounded 16-entry queue coalesces unsent changes; one slot is reserved for a transaction continuation/retry.
-- One acknowledged read at a time; addressed replies and property IDs are checked. Control writes do not wait for acknowledgements. Repetitions are bounded and preserve the TID where defined by the model. Separate reads verify actual device state.
+- One acknowledged read at a time; addressed replies and property IDs are checked. Control writes do not wait for acknowledgements and can proceed while a state read is awaiting a reply. Repetitions are bounded and preserve the TID where defined by the model. Separate reads verify actual device state.
 - Background polls are generated incrementally, rather than stored as a full per-device queue.
 - A 512-byte flash reader parses backups without keeping the complete JSON in RAM.
 - The backup workspace is the **inactive OTA partition**. Its previous image is overwritten by an import and the scratch backup is erased after processing.

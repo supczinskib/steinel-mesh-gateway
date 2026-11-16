@@ -29,7 +29,7 @@ int main() {
       };
       for(unsigned at=0;at<=60000;at+=500)n.schedule(BASE+at,drain);
       n.schedule(BASE+INPUT_AT,[&] {
-        n.gateway.node_next_request_at_=test_now+gap;
+        n.gateway.node_send_at_=test_now+gap;
         for(unsigned i:{0U,1U,2U})n.command(i,SteinelMesh::NodeCommand::ONOFF,1);
       });
       n.run(60000);drain();

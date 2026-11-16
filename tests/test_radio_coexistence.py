@@ -10,6 +10,7 @@ begin = source.index("void SteinelMesh::update_radio_coexistence_()")
 production = source[begin:source.index("void SteinelMesh::loop()", begin)]
 harness = r'''
 #include <atomic>
+#include "mesh_protocol.h"
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +36,7 @@ int esp_coex_status_bit_set(int type,uint32_t bits){
   radio_bits|=bits;return ESP_OK;
 }
 #define ESP_LOGW(...) ((void)0)
+namespace protocol = esphome::steinel_mesh::protocol;
 class SteinelMesh {
  public:
   enum class AccessOperation {NONE,NODE};
@@ -42,6 +44,7 @@ class SteinelMesh {
   bool mesh_started_=false;
   uint32_t radio_coexistence_status_=0;
   uint32_t radio_coexistence_retry_at_=0;
+  bool node_write_pending_{false}; uint32_t node_send_at_{0};
   std::atomic<bool> mesh_ready_{false},node_completion_pending_{false};
   std::atomic<AccessOperation> access_operation_{AccessOperation::NONE};
   ControlKind control_kind_=ControlKind::NONE;
@@ -95,6 +98,6 @@ int main(){
 with tempfile.TemporaryDirectory(prefix="steinel-radio-") as directory:
     binary = str(Path(directory) / "radio")
     subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                    "-fsanitize=address,undefined", "-x", "c++", "-", "-o", binary],
+                    "-fsanitize=address,undefined", "-I", str(ROOT / "esphome/components/steinel_mesh"), "-x", "c++", "-", "-o", binary],
                    input=harness+production+main, text=True, check=True)
     subprocess.run([binary], check=True)

@@ -362,6 +362,7 @@ static_assert(sizeof(DeviceDiagnostics) <= 2048, "One bounded diagnostic session
 
 struct StateTrace {
   static constexpr uint32_t DURATION_MS = 180000;
+  static constexpr uint16_t OBSOLETE_READ = 2;
   enum Event : uint8_t { QUEUED, SEND, RESPONSE, TIMEOUT, SEND_ERROR, SDK_RESULT, COMPLETED, WAIT, RECEIVED };
   enum Blocker : uint16_t {
     NOT_READY = 1, RESTARTING = 2, COMPLETION_PENDING = 4, ACCESS_BUSY = 8,

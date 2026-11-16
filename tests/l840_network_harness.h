@@ -144,6 +144,11 @@ class SteinelMesh {
   std::atomic<uint16_t> node_destination_{0}, node_expected_property_{0};
   std::atomic<uint32_t> mesh_rx_messages_{0}, mesh_generic_rx_{0}, mesh_sensor_rx_{0}, mesh_timeouts_{0};
   std::atomic<bool> node_completion_pending_{false}, node_completion_success_{false};
+  NodeRequest node_write_request_{};
+  uint16_t node_write_destination_{0};
+  bool node_write_pending_{false}, node_write_success_{false};
+  uint32_t node_send_at_{0};
+  std::atomic<bool> node_read_obsolete_{false};
   NodeRequest active_node_request_{};
   std::array<uint8_t, 3> node_property_storage_{};
   Buffer node_property_buffer_{};
@@ -167,6 +172,7 @@ class SteinelMesh {
   bool queue_node_command(uint16_t,NodeCommand,uint32_t);
   bool send_node_request_(const NodeRequest &);
   void finish_node_request_(bool);
+  bool consume_prewrite_reply_(const esp_ble_mesh_client_common_param_t *,uint32_t,bool,uint16_t=0);
   bool node_event_(const esp_ble_mesh_client_common_param_t *,uint32_t,bool,uint16_t=0);
   bool node_response_value_matches_(const esp_ble_mesh_client_common_param_t *,uint32_t,uint32_t) const;
   bool node_generic_event_(int,esp_ble_mesh_generic_client_cb_param_t *);

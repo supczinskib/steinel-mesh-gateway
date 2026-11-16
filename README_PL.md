@@ -8,7 +8,7 @@
 Urządzenia Steinel <-> Bluetooth Mesh <-> bramka ESP32-C3 -> Home Assistant
 ```
 
-Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.1** obsługuje wiele urządzeń z jednej sieci.
+Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.2** obsługuje wiele urządzeń z jednej sieci.
 
 Autor i opiekun: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -140,7 +140,7 @@ O zgodności decyduje rzeczywisty układ modeli i firmware urządzenia, nie sama
 
 Wszystkie pozycje wymagają prawidłowego backupu sieci Connect, Company ID `0x0563`, obsługiwanych modeli przypisanych do importowanego AppKey i spełnienia limitów poniżej. Lista nie obejmuje starszego własnościowego Bluetooth, zwykłych wersji bez łączności, urządzeń wyłącznie Z-Wave/KNX/DALI ani przycisków mających tylko modele klienckie. Konwersja Mesh może być nieodwracalna i zmieniać zgodność ze starszymi urządzeniami; przed aktualizacją lampy sprawdź [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/).
 
-Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.1](docs/releases/v2.0.1.md).
+Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.2](docs/releases/v2.0.2.md).
 
 ## Identyfikacja i wykrywanie funkcji
 
@@ -159,7 +159,7 @@ Wyjścia mają osobny harmonogram odczytów z bazowym odstępem 2 sekund, dostos
 - Jedna sieć i jedna para NetKey/AppKey, do **16 importowanych urządzeń**, **8 elementów na urządzenie** i **16 grup publikacji czujników**.
 - Modele wymagające innego AppKey nie są udostępniane do sterowania.
 - Kolejka 16 wpisów łączy niewysłane zmiany; jeden wpis jest zarezerwowany na kontynuację lub ponowną próbę transakcji.
-- Jeden odczyt wymagający odpowiedzi naraz; kontrola adresu, opcode i właściwości. Komendy sterujące nie czekają na potwierdzenie. Liczba powtórzeń jest ograniczona, z zachowaniem TID, jeżeli model go definiuje. Osobne odczyty sprawdzają rzeczywisty stan urządzenia.
+- Jeden odczyt wymagający odpowiedzi naraz; kontrola adresu, opcode i właściwości. Komendy sterujące nie czekają na potwierdzenie i mogą być wysyłane podczas oczekiwania na odpowiedź na odczyt stanu. Liczba powtórzeń jest ograniczona, z zachowaniem TID, jeżeli model go definiuje. Osobne odczyty sprawdzają rzeczywisty stan urządzenia.
 - Odczyty są tworzone kolejno, bez rozbudowanej kolejki wszystkich urządzeń.
 - Czytnik flash z buforem 512 bajtów nie przechowuje całego JSON w RAM.
 - Backup jest tymczasowo zapisywany w **nieaktywnej partycji OTA**. Import nadpisuje poprzedni obraz tej partycji; dane robocze są potem kasowane.

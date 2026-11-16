@@ -22,6 +22,7 @@ trap 'rm -f "$TEST_DIR/protocol"; rmdir "$TEST_DIR"' EXIT
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_slow_network.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_state_expiry.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_ha_output_state.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_unack_dispatch.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_device_diagnostics.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_command_trace.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_diagnostic_load.py"

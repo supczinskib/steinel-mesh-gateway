@@ -24,6 +24,7 @@ int main() {
       return newer_stable_firmware(target,std::strlen(target),current,std::strlen(current));
     };
     assert(newer("2.0.1","2.0.1-rc.1") && newer("2.0.1","2.0.1-rc.12"));
+    assert(newer("2.0.2","2.0.2-rc.1"));
     assert(newer("2.0.2","2.0.1-rc.1") && newer("2.1.0","2.0.1-rc.1"));
     assert(newer("2.0.0","1.9.2") && newer("2.0.1","2.0.0"));
     assert(!newer("2.0.0","2.0.1-rc.1") && !newer("2.0.1","2.0.1"));

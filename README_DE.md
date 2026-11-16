@@ -8,7 +8,7 @@
 Steinel-Geräte <-> Bluetooth Mesh <-> ESP32-C3 Gateway -> Home Assistant
 ```
 
-Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.1** unterstützt mehrere Geräte aus einem Netzwerk.
+Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.2** unterstützt mehrere Geräte aus einem Netzwerk.
 
 Autor und Maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -133,7 +133,7 @@ Entscheidend sind die tatsächlichen Modelle und die Firmware, nicht allein der 
 
 Voraussetzungen für alle Einträge: gültiges Connect-Netzwerkbackup, Company ID `0x0563`, unterstützte Modelle mit importierter AppKey-Bindung und Einhaltung der folgenden Grenzen. Proprietäre ältere Bluetooth-Firmware, unverbundene Varianten, reine Z-Wave-/KNX-/DALI-Produkte und reine Client-Taster sind nicht eingeschlossen. Die Mesh-Konvertierung kann unwiderruflich sein und die Kompatibilität mit älteren Geräten verändern; vorher die [Steinel Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) prüfen.
 
-Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.1](docs/releases/v2.0.1.md).
+Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.2](docs/releases/v2.0.2.md).
 
 ## Identität und Funktionserkennung
 
@@ -152,7 +152,7 @@ Ausgänge haben einen eigenen Abfrageplan mit einem Basisintervall von 2 Sekunde
 - Ein Netzwerk, ein NetKey/AppKey-Paar, bis zu **16 importierte Geräte**, **8 Elemente je Gerät** und **16 Sensor-Publikationsgruppen**.
 - Modelle mit anderem AppKey werden nicht für die Steuerung bereitgestellt.
 - Eine Warteschlange mit 16 Einträgen fasst ungesendete Änderungen zusammen; ein Eintrag bleibt für Fortsetzung oder Wiederholung einer Transaktion reserviert.
-- Nur eine Abfrage mit Antwort gleichzeitig; Prüfung von Adresse, Opcode und Eigenschaft. Steuerbefehle warten nicht auf Bestätigungen. Wiederholungen sind begrenzt und behalten die TID bei, sofern das Modell sie definiert. Separate Abfragen prüfen den tatsächlichen Gerätezustand.
+- Nur eine Abfrage mit Antwort gleichzeitig; Prüfung von Adresse, Opcode und Eigenschaft. Steuerbefehle warten nicht auf Bestätigungen und können auch gesendet werden, während eine Zustandsabfrage auf ihre Antwort wartet. Wiederholungen sind begrenzt und behalten die TID bei, sofern das Modell sie definiert. Separate Abfragen prüfen den tatsächlichen Gerätezustand.
 - Hintergrundabfragen werden schrittweise erzeugt, nicht als vollständige Geräteliste gepuffert.
 - Ein 512-Byte-Flash-Lesepuffer vermeidet das vollständige JSON im RAM.
 - Die Sicherung liegt vorübergehend in der **inaktiven OTA-Partition**. Deren bisheriges Firmware-Image wird überschrieben; die Arbeitskopie wird anschließend gelöscht.
