@@ -112,6 +112,10 @@ The gateway checks **bound SIG models** and authenticated Composition Data: elem
 
 Groups, neighbouring groups and Master/Slave remain configured in Steinel Connect. The gateway uses the existing network configuration without changing it.
 
+The web page's **Group commands** section sends unacknowledged commands to a configured group address (`0xC000`–`0xFEFF`). Enter the address of the group subscribed to by the relevant server model: output, brightness, automatic control, light threshold or run time. Output and brightness do not automatically disable LC mode; send an automatic-control command to the appropriate LC group separately if required. The gateway neither changes subscriptions nor knows group membership, and cannot confirm delivery or a group state. Individual devices continue to report their own observed state.
+
+The authenticated HTTP endpoint `POST /steinel/group` accepts form fields `address` (decimal group address), `command` (`output`, `brightness`, `automatic`, `threshold`, or `run_time`) and `value`. Values are 0/1 for output and automatic, 0–65535 for brightness, hundredths of a lux for threshold, and milliseconds for run time (both 0–16777214). A successful response means queued, not delivered.
+
 Output controls use the first eligible model (a Lightness output is preferred over a separate OnOff element). All Sensor elements are polled. Multiple independent outputs in one device are not represented as separate channels. Sensor readings remain unknown until the applicable property is received. A successfully transmitted command is not presented as a confirmed device state.
 
 ### Devices and compatibility

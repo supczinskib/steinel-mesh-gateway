@@ -71,6 +71,16 @@ const cards = test => [...test.document.querySelectorAll('#deviceList > .mainten
   const test = await boot();
   assert.equal(test.document.documentElement.lang,'en');
   assert.equal(test.document.getElementById('networkName').textContent,'Motion');
+  assert.equal(test.document.getElementById('groupPanel').classList.contains('hidden'),false);
+  const groupAddress=test.document.getElementById('groupAddress'), groupCommand=test.document.getElementById('groupCommand');
+  const groupValue=test.document.getElementById('groupValue');
+  groupAddress.value='0xC001';groupCommand.value='threshold';
+  groupCommand.dispatchEvent(new test.window.Event('change'));groupValue.value='12.34';
+  test.document.getElementById('sendGroup').click();await wait(0);
+  const groupCall=test.calls.find(call=>call.url==='/steinel/group');
+  assert.equal(groupCall.options.body.get('address'),'49153');
+  assert.equal(groupCall.options.body.get('command'),'threshold');
+  assert.equal(groupCall.options.body.get('value'),'1234');
   assert.equal(cards(test).length,3);
   for (const checkbox of test.document.querySelectorAll('input[type=checkbox]'))
     assert.equal(test.window.getComputedStyle(checkbox).accentColor,'var(--accent)');

@@ -13,6 +13,7 @@ trap 'rm -f "$TEST_DIR/protocol"; rmdir "$TEST_DIR"' EXIT
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_queue.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_events.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_transport.py"
+"${PYTHON:-python3}" "$ROOT_DIR/tests/test_group_commands.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_callbacks.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_polling.py"
 "${PYTHON:-python3}" "$ROOT_DIR/tests/test_node_partial_polling.py"

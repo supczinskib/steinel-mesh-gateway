@@ -24,6 +24,18 @@ input[type="checkbox"]{accent-color:var(--accent)}
 <div class="actions"><button id="saveSelection" class="primary">SAVE SELECTION AND RESTART</button></div>
 <p id="deviceHelp" class="notice"></p>
 </section>
+<section id="groupPanel" class="panel hidden">
+<h2>Group commands</h2>
+<p class="notice">Enter a group address configured in Steinel Connect. Only subscribed models receive the command. Group delivery and device state are not confirmed.</p>
+<div class="grid">
+<div class="field"><label for="groupAddress">Group address (hexadecimal)</label><input id="groupAddress" placeholder="0xC000" maxlength="6" autocomplete="off"></div>
+<div class="field"><label for="groupCommand">Command</label><select id="groupCommand"><option value="output">Output</option><option value="brightness">Brightness (%)</option><option value="automatic">Automatic control</option><option value="threshold">Light threshold (lx)</option><option value="run_time">Run time (s)</option></select></div>
+<div class="field"><label for="groupValue">Value</label><input id="groupValue" type="number" min="0" max="1" step="1"></div>
+</div>
+<p class="notice">For output and automatic control use 0 for Off and 1 for On. Output and brightness do not change automatic control.</p>
+<div class="actions"><button id="sendGroup" class="primary">SEND GROUP COMMAND</button></div>
+<p id="groupStatus" class="notice"></p>
+</section>
 <section id="deviceReportPanel" class="panel hidden">
 <h2>Prepare device report</h2>
 <p id="reportDevice" data-i18n-ignore></p>
@@ -68,6 +80,21 @@ const versionParts=value=>{const match=String(value).match(/^v?(0|[1-9]\d*)\.(0|
 const compareVersions=(left,right)=>{const a=versionParts(left),b=versionParts(right);for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]>b[i]?1:-1}if(a[3]===b[3])return 0;if(a[3]===0)return 1;if(b[3]===0)return -1;return a[3]>b[3]?1:-1};
 const values=()=>{const p=new URLSearchParams;p.set('email',q('#email').value);p.set('password',q('#password').value);return p};
 async function post(url,p){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p}),j=await r.json();if(!r.ok)throw Error(j.message||`HTTP ${r.status}`);return j}
+const groupSpecs={output:[1,1,1],brightness:[655.35,100,0.01],automatic:[1,1,1],threshold:[100,167772.14,0.01],run_time:[1000,16777.214,0.001]};let groupSending=false;
+q('#groupCommand').onchange=()=>{const [,max,step]=groupSpecs[q('#groupCommand').value];const input=q('#groupValue');input.max=max;input.step=step;input.value=''};
+q('#sendGroup').onclick=async()=>{
+  const address=q('#groupAddress').value.trim(),input=q('#groupValue'),command=q('#groupCommand').value;
+  const [scale,max]=groupSpecs[command],value=Number(input.value);
+  if(!/^(?:0x)?[0-9a-f]{4}$/i.test(address)||parseInt(address.replace(/^0x/i,''),16)<0xC000||parseInt(address.replace(/^0x/i,''),16)>0xFEFF||input.value===''||!Number.isFinite(value)||value<0||value>max||((command==='output'||command==='automatic')&&!Number.isInteger(value))){
+    q('#groupStatus').textContent='Invalid group command parameters';return;
+  }
+  groupSending=true;q('#sendGroup').disabled=true;
+  try{
+    const result=await post('/steinel/group',new URLSearchParams({address:String(parseInt(address.replace(/^0x/i,''),16)),command,value:String(Math.round(value*scale))}));
+    q('#groupStatus').textContent=result.message;
+  }catch(e){q('#groupStatus').textContent=e.message}
+  finally{groupSending=false;q('#sendGroup').disabled=!lastStatus?.enabled||!lastStatus?.mesh_ready||lastStatus?.busy}
+};
 let statusPollPromise=null;
 let lastConfigured=null;
 function poll(){
@@ -100,6 +127,8 @@ async function readStatus(){
       q('#meshRssi').textContent=j.mesh_rssi_received?`${j.mesh_last_rssi_dbm} dBm · ${j.mesh_last_rssi_age_seconds||0}s ago`:'—';
     }
     q('#configured').classList.toggle('hidden',!j.configured);
+    q('#groupPanel').classList.toggle('hidden',!j.configured);
+    q('#sendGroup').disabled=groupSending||!j.enabled||!j.mesh_ready||j.busy;
     const networkImport=q('#networkImport');
     if(lastConfigured!==j.configured){networkImport.open=!j.configured;lastConfigured=j.configured}
     q('#networkImportSummary').textContent=j.configured?'Change or reimport network':'Set up a Mesh network';

@@ -1847,6 +1847,10 @@ void SteinelMesh::generic_callback(esp_ble_mesh_generic_client_cb_event_t event,
   SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT &&
+      protocol::group(param->params->ctx.addr) && param->error_code != 0)
+    ESP_LOGW(TAG, "Group command to 0x%04X failed asynchronously: %d",
+             param->params->ctx.addr, int(param->error_code));
   if (self->node_generic_event_(event, param)) return;
   if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.onoff_address) return;
   if (event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT) {
@@ -1956,6 +1960,10 @@ void SteinelMesh::light_callback(esp_ble_mesh_light_client_cb_event_t event,
   SteinelMesh *self = SteinelMesh::instance_;
   if (self == nullptr || param == nullptr || param->params == nullptr)
     return;
+  if (event == ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT &&
+      protocol::group(param->params->ctx.addr) && param->error_code != 0)
+    ESP_LOGW(TAG, "Group command to 0x%04X failed asynchronously: %d",
+             param->params->ctx.addr, int(param->error_code));
   if (self->node_light_event_(event, param)) return;
   if (!self->legacy_profile_ || param->params->ctx.addr != self->config_.lc_address) return;
   if (event == ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT) {
@@ -2268,7 +2276,7 @@ void SteinelMesh::loop() {
     this->keys_bound_pending_ = false;
     this->mark_ready_();
   }
-  if (!this->mesh_ready_.load())
+  if (!this->mesh_ready_.load()) 
     return;
   if (this->web_refresh_pending_.load() &&
       this->access_operation_.load() == AccessOperation::NONE &&
@@ -2278,6 +2286,7 @@ void SteinelMesh::loop() {
   }
   this->expire_access_operation_(now);
   this->expire_diagnostic_groups_(now);
+  this->advance_group_commands_(now);
   this->advance_nodes_(now);
   this->update_radio_coexistence_();
   this->advance_address_recovery_(now);
