@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.0.3 - 2026-11-25
+
+- Add group command functionality to Steinel Mesh
+- Introduced a new group command panel in the web interface allowing users to send commands to groups of devices.
+- Implemented backend handling for group commands including validation and queuing.
+
 ## 2.0.2 - 2026-11-16
 
 - Dispatch unacknowledged controls while a state GET is awaiting a reply, with independent read and write completions and bounded send spacing.

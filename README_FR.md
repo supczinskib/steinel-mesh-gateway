@@ -8,7 +8,7 @@
 Appareils Steinel <-> Bluetooth Mesh <-> Passerelle ESP32-C3 -> Home Assistant
 ```
 
-Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.2** prend en charge plusieurs appareils d’un même réseau.
+Passerelle Bluetooth Mesh autonome pour les installations Steinel, avec interface web locale et intégration Home Assistant par l’API native ESPHome. La version **2.0.3** prend en charge plusieurs appareils d’un même réseau.
 
 Auteur et responsable : **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -112,6 +112,10 @@ La passerelle vérifie les **modèles SIG associés à une clé** et les Composi
 
 Les groupes, groupes voisins et relations Master/Slave se configurent dans Steinel Connect. La passerelle utilise la configuration existante du réseau sans la modifier.
 
+La section **Commandes de groupe** de la page web envoie des commandes non acquittées à une adresse de groupe configurée (`0xC000`–`0xFEFF`). Saisissez l’adresse du groupe auquel est abonné le modèle serveur concerné : sortie, luminosité, automatisme, seuil de lumière ou durée d’allumage. La sortie et la luminosité ne désactivent pas automatiquement le mode LC ; envoyez séparément une commande d’automatisme au groupe LC approprié si nécessaire. La passerelle ne modifie pas les abonnements et ne connaît pas les membres du groupe : elle ne peut ni confirmer la livraison ni lire l’état du groupe. Chaque appareil continue de publier son propre état observé.
+
+Le point HTTP authentifié `POST /steinel/group` accepte les champs de formulaire `address` (adresse de groupe décimale), `command` (`output`, `brightness`, `automatic`, `threshold` ou `run_time`) et `value`. Les valeurs sont 0/1 pour `output` et `automatic`, 0–65535 pour `brightness`, des centièmes de lux pour `threshold` et des millisecondes pour `run_time` (les deux dans la plage 0–16777214). Une réponse réussie signifie que la commande a été mise en file, pas qu’elle a été remise.
+
 Les sorties utilisent le premier modèle compatible ; une sortie Lightness est prioritaire sur un élément OnOff séparé. Tous les éléments Sensor sont interrogés. Les sorties indépendantes d’un appareil ne sont pas exposées comme des canaux distincts. Les capteurs restent inconnus jusqu’à réception d’une propriété pertinente. L’envoi d’une commande ne constitue pas une confirmation de l’état réel.
 
 ### Appareils et compatibilité
@@ -129,7 +133,7 @@ La compatibilité dépend des modèles réels et du micrologiciel, pas uniquemen
 
 Chaque entrée exige une sauvegarde valide du réseau Connect, Company ID `0x0563`, des modèles pris en charge associés à l’AppKey importée et le respect des limites ci-dessous. Les anciennes versions Bluetooth propriétaires, variantes non connectées, produits uniquement Z-Wave/KNX/DALI et boutons uniquement clients ne sont pas inclus. La conversion Mesh peut être irréversible et modifier la compatibilité avec les anciens appareils ; consulter la [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) avant une mise à jour.
 
-Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.2](docs/releases/v2.0.2.md).
+Voir les [détails de compatibilité](docs/DEVICE_COMPATIBILITY.md) et la [description de la version 2.0.3](docs/releases/v2.0.3.md).
 
 ## Identité et découverte des fonctions
 

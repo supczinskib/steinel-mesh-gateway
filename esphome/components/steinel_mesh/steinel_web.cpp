@@ -1517,7 +1517,7 @@ bool SteinelMesh::canHandle(AsyncWebServerRequest *request) const {
           url == "/steinel/refresh" || url == "/steinel/password" ||
           url == "/steinel/wifi" || url == "/steinel/update" ||
           url == "/steinel/factory-reset" || url == "/steinel/selection" ||
-          url == "/steinel/node" || url == "/steinel/import" || url == "/steinel/diagnostics" || url == "/api/state-trace");
+          url == "/steinel/node" || url == "/steinel/group" || url == "/steinel/import" || url == "/steinel/diagnostics" || url == "/api/state-trace");
 }
 
 void SteinelMesh::handleRequest(AsyncWebServerRequest *request) {
@@ -1532,6 +1532,7 @@ void SteinelMesh::handleRequest(AsyncWebServerRequest *request) {
   if (url == "/steinel/diagnostics") return this->handle_diagnostic_session_(request);
   if (url == "/steinel/selection") return this->handle_selection_(request);
   if (url == "/steinel/node") return this->handle_node_control_(request);
+  if (url == "/steinel/group") return this->handle_group_control_(request);
   if (url == "/steinel/import") return this->handle_local_import_(request);
   if (url == "/steinel/discover") return this->handle_discover_(request);
   if (url == "/steinel/install") return this->handle_install_(request);
@@ -1916,6 +1917,27 @@ void SteinelMesh::handle_node_control_(AsyncWebServerRequest *request) {
   if (!this->queue_node_command(address, kind, value))
     return send_json_(request, 409, "{\"message\":\"Device is not verified/available or command queue is full\"}");
   send_json_(request, 200, "{\"message\":\"Command queued; waiting for the device's confirmed state\"}");
+}
+
+void SteinelMesh::handle_group_control_(AsyncWebServerRequest *request) {
+  uint32_t address = 0, value = 0;
+  const std::string command = request->arg("command").c_str();
+  NodeCommand kind;
+  if (command == "output") kind = NodeCommand::ONOFF;
+  else if (command == "brightness") kind = NodeCommand::BRIGHTNESS;
+  else if (command == "automatic") kind = NodeCommand::AUTO;
+  else if (command == "threshold") kind = NodeCommand::THRESHOLD;
+  else if (command == "run_time") kind = NodeCommand::RUN_TIME;
+  else return send_json_(request, 400, "{\"message\":\"Unknown group command\"}");
+  if (request->arg("address").empty() || request->arg("value").empty() ||
+      !this->parse_u32_(request->arg("address").c_str(), 0xC000, 0xFEFF, address) ||
+      !this->parse_u32_(request->arg("value").c_str(), 0, 0xFFFFFE, value) ||
+      ((kind == NodeCommand::ONOFF || kind == NodeCommand::AUTO) && value > 1) ||
+      (kind == NodeCommand::BRIGHTNESS && value > 65535))
+    return send_json_(request, 400, "{\"message\":\"Invalid group command parameters\"}");
+  if (!this->queue_group_command(address, kind, value))
+    return send_json_(request, 409, "{\"message\":\"Mesh is not ready or group command queue is full\"}");
+  send_json_(request, 200, "{\"message\":\"Group command queued; delivery is not confirmed\"}");
 }
 
 void SteinelMesh::handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len,

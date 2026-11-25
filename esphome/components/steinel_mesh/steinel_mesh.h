@@ -78,6 +78,7 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
                   size_t index, size_t total) override;
   enum class NodeCommand : uint8_t { ONOFF, BRIGHTNESS, AUTO, THRESHOLD, RUN_TIME, MODE };
   bool queue_node_command(uint16_t address, NodeCommand command, uint32_t value);
+  bool queue_group_command(uint16_t address, NodeCommand command, uint32_t value);
 
   void set_threshold(float lux);
   void set_mode(const std::string &mode);
@@ -326,6 +327,15 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   std::array<NodeRequest, NODE_QUEUE_SIZE> node_queue_{};
   std::mutex node_mutex_;
   uint8_t node_queue_count_{0};
+  struct GroupRequest {
+    uint16_t address;
+    NodeCommand command;
+    uint32_t value;
+  };
+  std::array<GroupRequest, 8> group_queue_{};
+  uint8_t group_queue_count_{0};
+  std::array<uint8_t, 3> group_property_storage_{};
+  net_buf_simple group_property_buffer_{};
   NodeRequest active_node_request_{};
   NodeRequest node_write_request_{};
   uint16_t node_write_destination_{0};
@@ -380,6 +390,7 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   bool restore_catalog_();
   void setup_node_entities_();
   void advance_nodes_(uint32_t now);
+  void advance_group_commands_(uint32_t now);
   bool poll_priority_(uint32_t now);
   void dispatch_node_request_(const NodeRequest &request, uint32_t now);
   bool send_node_request_(const NodeRequest &request);
@@ -399,6 +410,7 @@ class SteinelMesh final : public PollingComponent, public AsyncWebHandler {
   void handle_nodes_(AsyncWebServerRequest *request);
   void handle_selection_(AsyncWebServerRequest *request);
   void handle_node_control_(AsyncWebServerRequest *request);
+  void handle_group_control_(AsyncWebServerRequest *request);
   void handle_local_import_(AsyncWebServerRequest *request);
   static void local_import_task_(void *parameter);
   bool install_backup_(CloudBody &body, uint32_t iv_index, uint16_t address, std::string &error);

@@ -8,7 +8,7 @@
 Steinel-Geräte <-> Bluetooth Mesh <-> ESP32-C3 Gateway -> Home Assistant
 ```
 
-Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.2** unterstützt mehrere Geräte aus einem Netzwerk.
+Eigenständiges Bluetooth-Mesh-Gateway für Steinel-Installationen mit lokaler Weboberfläche und Home Assistant über die native ESPHome-API. **2.0.3** unterstützt mehrere Geräte aus einem Netzwerk.
 
 Autor und Maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -116,6 +116,10 @@ Das Gateway prüft **gebundene SIG-Modelle** und authentifizierte Composition Da
 
 Gruppen, Nachbargruppen und Master/Slave werden in Steinel Connect konfiguriert. Das Gateway verwendet die vorhandene Netzwerkkonfiguration unverändert.
 
+Unter **Gruppenbefehle** sendet die Weboberfläche unbestätigte Befehle an eine konfigurierte Gruppenadresse (`0xC000`–`0xFEFF`). Geben Sie die vom jeweiligen Servermodell abonnierte Gruppenadresse für Ausgang, Helligkeit, Automatik, Lichtschwelle oder Nachlaufzeit ein. Ausgang und Helligkeit deaktivieren den LC-Modus nicht automatisch; senden Sie bei Bedarf einen separaten Automatikbefehl an die passende LC-Gruppe. Das Gateway verändert keine Abonnements, kennt die Gruppenzugehörigkeit nicht und kann weder Zustellung noch Gruppenzustand bestätigen. Die einzelnen Geräte melden weiterhin ihren beobachteten Zustand.
+
+Der authentifizierte HTTP-Endpunkt `POST /steinel/group` akzeptiert die Formularfelder `address` (dezimal), `command` (`output`, `brightness`, `automatic`, `threshold` oder `run_time`) und `value`. Die Werte sind 0/1 für Ausgang und Automatik, 0–65535 für Helligkeit, Hundertstel Lux für die Lichtschwelle und Millisekunden für die Nachlaufzeit (jeweils 0–16777214). Eine erfolgreiche Antwort bestätigt nur die Aufnahme in die Warteschlange.
+
 Ausgänge nutzen das erste geeignete Modell; ein Lightness-Ausgang hat Vorrang vor einem separaten OnOff-Element. Alle Sensor-Elemente werden abgefragt. Mehrere unabhängige Ausgänge eines Geräts werden nicht als getrennte Kanäle dargestellt. Sensoren bleiben unbekannt, bis die entsprechende Eigenschaft empfangen wird. Ein versendeter Befehl gilt nicht als bestätigter Gerätezustand.
 
 ### Geräte und Kompatibilität
@@ -133,7 +137,7 @@ Entscheidend sind die tatsächlichen Modelle und die Firmware, nicht allein der 
 
 Voraussetzungen für alle Einträge: gültiges Connect-Netzwerkbackup, Company ID `0x0563`, unterstützte Modelle mit importierter AppKey-Bindung und Einhaltung der folgenden Grenzen. Proprietäre ältere Bluetooth-Firmware, unverbundene Varianten, reine Z-Wave-/KNX-/DALI-Produkte und reine Client-Taster sind nicht eingeschlossen. Die Mesh-Konvertierung kann unwiderruflich sein und die Kompatibilität mit älteren Geräten verändern; vorher die [Steinel Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) prüfen.
 
-Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.2](docs/releases/v2.0.2.md).
+Siehe [Kompatibilitätsdetails](docs/DEVICE_COMPATIBILITY.md) und die [Release-Beschreibung 2.0.3](docs/releases/v2.0.3.md).
 
 ## Identität und Funktionserkennung
 
