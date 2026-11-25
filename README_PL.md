@@ -8,7 +8,7 @@
 Urządzenia Steinel <-> Bluetooth Mesh <-> bramka ESP32-C3 -> Home Assistant
 ```
 
-Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.2** obsługuje wiele urządzeń z jednej sieci.
+Samodzielna brama Bluetooth Mesh do instalacji Steinel, z lokalnym panelem WWW i integracją Home Assistant przez standardowe API ESPHome. Wersja **2.0.3** obsługuje wiele urządzeń z jednej sieci.
 
 Autor i opiekun: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -123,6 +123,10 @@ Brama sprawdza **modele SIG z przypisanym kluczem** i uwierzytelnioną Compositi
 
 Grupy, grupy sąsiednie i Master/Slave konfiguruje się w Steinel Connect. Brama korzysta z istniejącej konfiguracji sieci, nie zmieniając jej.
 
+Sekcja **Polecenia grupowe** na stronie WWW wysyła niepotwierdzane polecenia pod skonfigurowany adres grupy (`0xC000`–`0xFEFF`). Wprowadź adres grupy subskrybowanej przez odpowiedni model serwera: wyjścia, jasności, automatyki, progu światła lub czasu świecenia. Polecenie wyjścia lub jasności nie wyłącza automatycznie trybu LC; w razie potrzeby wyślij osobno polecenie automatyki do odpowiedniej grupy LC. Bramka nie zmienia subskrypcji ani nie zna członkostwa w grupie i nie może potwierdzić dostarczenia ani odczytać stanu grupy. Poszczególne urządzenia nadal raportują własny obserwowany stan.
+
+Uwierzytelniony punkt HTTP `POST /steinel/group` przyjmuje pola formularza `address` (dziesiętny adres grupy), `command` (`output`, `brightness`, `automatic`, `threshold` lub `run_time`) i `value`. Dopuszczalne wartości to 0/1 dla `output` i `automatic`, 0–65535 dla `brightness`, setne części luksu dla `threshold` oraz milisekundy dla `run_time` (oba 0–16777214). Pomyślna odpowiedź oznacza dodanie polecenia do kolejki, a nie jego dostarczenie.
+
 Sterowanie wyjściem korzysta z pierwszego odpowiedniego modelu; wyjście Lightness ma pierwszeństwo przed osobnym OnOff. Odczyty obejmują wszystkie elementy Sensor. Niezależne wyjścia jednego urządzenia nie są wystawiane jako osobne kanały. Czujnik pozostaje nieznany, dopóki nie otrzyma właściwego raportu. Samo wysłanie polecenia nie jest potwierdzeniem stanu urządzenia.
 
 ### Urządzenia i zgodność
@@ -140,7 +144,7 @@ O zgodności decyduje rzeczywisty układ modeli i firmware urządzenia, nie sama
 
 Wszystkie pozycje wymagają prawidłowego backupu sieci Connect, Company ID `0x0563`, obsługiwanych modeli przypisanych do importowanego AppKey i spełnienia limitów poniżej. Lista nie obejmuje starszego własnościowego Bluetooth, zwykłych wersji bez łączności, urządzeń wyłącznie Z-Wave/KNX/DALI ani przycisków mających tylko modele klienckie. Konwersja Mesh może być nieodwracalna i zmieniać zgodność ze starszymi urządzeniami; przed aktualizacją lampy sprawdź [FAQ Steinel Connect](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/).
 
-Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.2](docs/releases/v2.0.2.md).
+Zobacz [szczegóły zgodności](docs/DEVICE_COMPATIBILITY.md) i [opis wydania 2.0.3](docs/releases/v2.0.3.md).
 
 ## Identyfikacja i wykrywanie funkcji
 

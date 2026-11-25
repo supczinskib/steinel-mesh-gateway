@@ -8,7 +8,7 @@
 Steinel devices <-> Bluetooth Mesh <-> ESP32-C3 gateway -> Home Assistant
 ```
 
-A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.2** supports multiple devices from one network.
+A standalone Bluetooth Mesh gateway for Steinel installations, with a local web interface and Home Assistant integration through the standard ESPHome API. Version **2.0.3** supports multiple devices from one network.
 
 Author and maintainer: **Bartosz Supcziński** — <bartek@env.pl>
 
@@ -133,7 +133,7 @@ Compatibility depends on the actual models and firmware, not the commercial name
 
 All entries require a valid Connect network backup, Company ID `0x0563`, supported models bound to the imported AppKey, and the limits below. Older proprietary Bluetooth firmware, ordinary non-connected variants, Z-Wave/KNX/DALI-only products and client-only buttons are not covered. Mesh conversion can be irreversible and affect compatibility with older devices; consult [Steinel's Connect FAQ](https://www.steinel-shop.de/service/produktinfos-beratung/faq/faq-connect-app/) before updating a lamp.
 
-See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.2 release description](docs/releases/v2.0.2.md).
+See [compatibility details](docs/DEVICE_COMPATIBILITY.md) and the [2.0.3 release description](docs/releases/v2.0.3.md).
 
 ## Device identity and discovery
 

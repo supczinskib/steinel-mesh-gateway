@@ -67,7 +67,7 @@ const server = http.createServer(async (request, response) => {
       if (url.pathname === '/') return respond(response, 200, page(), 'text/html; charset=utf-8');
       if (url.pathname === '/steinel/status') return respond(response, 200, state.status);
       if (url.pathname === '/api/nodes') return respond(response, 200, {nodes: state.nodes});
-      if (url.pathname === '/demo/release') return respond(response, 200, {tag_name: 'v2.0.2'});
+      if (url.pathname === '/demo/release') return respond(response, 200, {tag_name: 'v2.0.3'});
       if (url.pathname === '/api/diagnostics') return respond(response, 409, {message: 'Device reports require real hardware and are not collected in this demo.'});
       return respond(response, 404, {message: 'Not found'});
     }
